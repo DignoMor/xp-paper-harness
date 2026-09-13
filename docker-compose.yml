@@ -1,0 +1,29 @@
+services:
+  paper-harness:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: paper-harness:v1
+    restart: unless-stopped
+    init: true
+    env_file: .env
+    environment:
+      PAPER_HARNESS_DATA_ROOT: /data
+      PAPER_HARNESS_HOST: 0.0.0.0
+      PAPER_HARNESS_PORT: "8787"
+    ports:
+      # Loopback only. The service is unauthenticated and must never be exposed
+      # on a public interface.
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - ${PAPER_HARNESS_HOST_DATA_DIR:?set PAPER_HARNESS_HOST_DATA_DIR in .env}:/data
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8787/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s

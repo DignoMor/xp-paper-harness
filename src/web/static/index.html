@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Paper Harness</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="brand">
+        <h1>Paper Harness</h1>
+        <span class="brand-subtitle">Local-first Papers, Paper Notes, and research agent</span>
+      </div>
+      <div id="provider-disclosure" class="provider-disclosure" role="note" aria-live="polite">
+        Loading provider information…
+      </div>
+    </header>
+
+    <main class="layout">
+      <aside class="pane sidebar" aria-label="Conversations">
+        <div class="pane-header">
+          <h2>Conversations</h2>
+          <button id="new-conversation" type="button" class="btn btn-small">New</button>
+        </div>
+        <ul id="conversation-list" class="conversation-list"></ul>
+      </aside>
+
+      <section class="pane transcript-pane" aria-label="Conversation">
+        <div id="transcript" class="transcript" aria-live="polite"></div>
+        <div id="error-banner" class="error-banner hidden" role="alert"></div>
+        <form id="composer" class="composer" autocomplete="off">
+          <div id="upload-chip" class="upload-chip hidden"></div>
+          <textarea
+            id="composer-input"
+            class="composer-input"
+            rows="3"
+            placeholder="Ask the Paper Agent about your Papers…"
+          ></textarea>
+          <div class="composer-actions">
+            <label class="btn btn-ghost upload-button">
+              Upload PDF
+              <input id="upload-input" type="file" accept="application/pdf,.pdf" hidden />
+            </label>
+            <span class="composer-hint">Cmd/Ctrl + Enter to send</span>
+            <span class="spacer"></span>
+            <button id="stop-button" type="button" class="btn btn-danger hidden">Stop</button>
+            <button id="send-button" type="submit" class="btn btn-primary">Send</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="pane library-pane" aria-label="Papers">
+        <div class="pane-header">
+          <h2>Papers</h2>
+          <button id="refresh-papers" type="button" class="btn btn-small">Refresh</button>
+        </div>
+        <div id="papers-list" class="papers-list"></div>
+        <div id="paper-detail" class="paper-detail hidden"></div>
+      </section>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
