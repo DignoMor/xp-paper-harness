@@ -4,6 +4,7 @@ import type {
   ConversationMeta,
   ConversationStore,
 } from "../conversations/conversation-store.js";
+import { DEFAULT_CONVERSATION_TITLE } from "../conversations/conversation-store.js";
 import { buildSystemPrompt, assertApprovedToolNames } from "./system-prompt.js";
 import { createPaperTools, executeTool, type AgentTool, type AgentToolContext } from "./tools.js";
 
@@ -57,6 +58,18 @@ export class PaperAgent {
       );
       conversation = created.meta;
     }
+
+    if (conversation.title === DEFAULT_CONVERSATION_TITLE) {
+      const prior = await this.deps.conversations.history(conversation.conversation_id);
+      const isFirstUserMessage = !prior.some((message) => message.role === "user");
+      if (isFirstUserMessage) {
+        conversation = await this.deps.conversations.rename(
+          conversation.conversation_id,
+          this.deps.conversations.defaultTitleFromPrompt(input.prompt),
+        );
+      }
+    }
+
     yield { type: "conversation", conversation };
 
     await this.deps.conversations.appendMessage(conversation.conversation_id, {

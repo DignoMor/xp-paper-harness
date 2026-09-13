@@ -8,6 +8,7 @@ import { AppError } from "../../domain/errors.js";
 import { isUploadId, type UploadId } from "../../domain/ids.js";
 import type { DataPaths, StagedUpload, UploadStore } from "../../application/ports.js";
 import { atomicWriteFile, ensureDir, removeIfExists } from "./atomic.js";
+import { isNotFound } from "./errors.js";
 import { randomBytes } from "node:crypto";
 
 interface UploadMeta {
@@ -154,10 +155,4 @@ export class FileSystemUploadStore implements UploadStore {
   }
 }
 
-function isNotFound(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    (error as { code?: string }).code === "ENOENT"
-  );
-}
+

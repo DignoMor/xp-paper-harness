@@ -4,6 +4,7 @@ import { parseNote, serializeNote, type ManagedFrontmatter, type ParsedNote } fr
 import { isPaperId, type PaperId } from "../../domain/ids.js";
 import type { DataPaths, NoteStore } from "../../application/ports.js";
 import { atomicWriteFile, ensureDir, removeIfExists } from "./atomic.js";
+import { isNotFound } from "./errors.js";
 
 export class FileSystemNoteStore implements NoteStore {
   constructor(private readonly paths: DataPaths) {}
@@ -60,10 +61,4 @@ export class FileSystemNoteStore implements NoteStore {
   }
 }
 
-function isNotFound(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    (error as { code?: string }).code === "ENOENT"
-  );
-}
+

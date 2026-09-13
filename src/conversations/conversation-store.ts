@@ -3,6 +3,7 @@ import type { Clock, DataPaths } from "../application/ports.js";
 import { AppError } from "../domain/errors.js";
 import { uuidv7 } from "../domain/ids.js";
 import { atomicWriteFile, ensureDir } from "../infrastructure/fs/atomic.js";
+import { isNotFound } from "../infrastructure/fs/errors.js";
 
 export type ConversationId = string & { readonly __brand: "ConversationId" };
 
@@ -344,10 +345,4 @@ function isRole(value: unknown): value is ConversationMessage["role"] {
   );
 }
 
-function isNotFound(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    (error as { code?: string }).code === "ENOENT"
-  );
-}
+

@@ -145,7 +145,32 @@ npm test
 ```
 
 Tests use the deterministic `FakeLlmProvider` and need no network access or
-credentials.
+credentials. The primary acceptance test (`test/acceptance.test.ts`) drives the
+real HTTP/SSE server and the reconciliation command against a temporary external
+data root.
+
+### Credential-gated provider smoke test
+
+With real OpenCode Go credentials, run the smoke test that verifies streaming
+against DeepSeek V4.1 Flash and a stable Conversation session header:
+
+```sh
+OPENCODE_GO_API_KEY=... OPENCODE_GO_BASE_URL=https://opencode.ai/zen/v1 \
+  npx vitest run test/provider-smoke.test.ts
+```
+
+It is skipped automatically when `OPENCODE_GO_API_KEY` is unset.
+
+### Container acceptance
+
+With Docker running, the container acceptance flow builds and starts Compose
+against a temporary external data directory, exercises upload/SSE, asserts
+loopback-only publication and data containment, and runs reconciliation inside
+the container:
+
+```sh
+bash scripts/acceptance-docker.sh
+```
 
 ## Known v1 limitations
 

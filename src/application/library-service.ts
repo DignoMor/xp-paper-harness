@@ -5,7 +5,6 @@ import { normalizeDoi } from "../domain/doi.js";
 import type { AttachmentId, IdGenerator, PaperId, UploadId } from "../domain/ids.js";
 import { isAttachmentId, isPaperId } from "../domain/ids.js";
 import { applyAttachmentMetadataPatch, applyPaperMetadataPatch } from "../domain/metadata.js";
-import type { AttachmentMetadataPatch } from "../domain/metadata.js";
 import {
   emptyMetadata,
   paperToDetail,
@@ -18,7 +17,7 @@ import {
   type PaperSummary,
 } from "../domain/paper.js";
 import type { Catalog } from "../domain/catalog.js";
-import { CATALOG_SCHEMA_VERSION } from "../domain/catalog.js";
+import { CATALOG_SCHEMA_VERSION, validateMetadata } from "../domain/catalog.js";
 import type { ParsedNote } from "../domain/note.js";
 import type {
   CatalogStore,
@@ -30,13 +29,9 @@ import type {
   UploadStore,
 } from "./ports.js";
 import { atomicWriteFile, ensureDir, removeIfExists, sha256Hex } from "../infrastructure/fs/atomic.js";
+import { isNotFound } from "../infrastructure/fs/errors.js";
 import { defaultIdGenerator } from "../domain/ids.js";
-import {
-  assertKnownKeys,
-  isPlainObject,
-  requireArray,
-  requireString,
-} from "../domain/validate.js";
+import { assertKnownKeys, isPlainObject } from "../domain/validate.js";
 import { PAPER_METADATA_FIELDS } from "../domain/paper.js";
 
 export interface ImportPaperInput {
@@ -504,32 +499,13 @@ export class LibraryService {
       throw new AppError("INVALID_INPUT", "metadata must be an object.", { field: "metadata" });
     }
     assertKnownKeys(input, PAPER_METADATA_FIELDS, "metadata");
-    const base = JSON.parse(JSON.stringify(metadata)) as PaperMetadata;
-    const draft: Record<string, unknown> = { ...base };
+    const draft: Record<string, unknown> = JSON.parse(JSON.stringify(metadata)) as Record<string, unknown>;
     for (const [key, value] of Object.entries(input)) {
       if (value === undefined) continue;
       draft[key] = value;
     }
-    const candidate: PaperMetadata = {
-      item_type: requireString(draft.item_type, "metadata.item_type", { max: 100 }),
-      title: requireString(draft.title, "metadata.title", { max: 2000 }),
-      creators: requireArray(draft.creators, "metadata.creators") as PaperMetadata["creators"],
-      tags: requireArray(draft.tags ?? [], "metadata.tags") as string[],
-    };
-    for (const field of [
-      "abstract_note",
-      "publication_title",
-      "volume",
-      "issue",
-      "pages",
-      "date",
-      "doi",
-      "url",
-    ] as const) {
-      const value = draft[field];
-      if (typeof value === "string") candidate[field] = value;
-    }
-    Object.assign(metadata, candidate);
+    const validated = validateMetadata(draft, "metadata");
+    Object.assign(metadata, validated);
   }
 
   private buildAttachmentRecord(input: {
@@ -655,10 +631,4 @@ function mapExtractionStatus(status: PdfExtraction["status"]): ExtractionStatus 
   }
 }
 
-function isNotFound(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    (error as { code?: string }).code === "ENOENT"
-  );
-}
+

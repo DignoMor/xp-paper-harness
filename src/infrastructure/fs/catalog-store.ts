@@ -8,6 +8,7 @@ import {
 } from "../../domain/catalog.js";
 import type { CatalogStore, DataPaths } from "../../application/ports.js";
 import { atomicWriteFile } from "./atomic.js";
+import { isNotFound } from "./errors.js";
 
 export class FileSystemCatalogStore implements CatalogStore {
   private queue: Promise<unknown> = Promise.resolve();
@@ -71,10 +72,4 @@ export class FileSystemCatalogStore implements CatalogStore {
   }
 }
 
-function isNotFound(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    (error as { code?: string }).code === "ENOENT"
-  );
-}
+
