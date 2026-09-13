@@ -70,11 +70,13 @@ async function handle(
   const path = url.pathname;
   const method = req.method ?? "GET";
 
-  if (method === "GET" && path === "/api/health") {
+  if (path === "/api/health") {
+    if (method !== "GET") throw methodNotAllowed(method, path);
     sendJson(res, 200, { status: "ok", provider: deps.llmName, model: deps.llmModel });
     return;
   }
-  if (method === "GET" && path === "/api/config") {
+  if (path === "/api/config") {
+    if (method !== "GET") throw methodNotAllowed(method, path);
     sendJson(res, 200, {
       provider: deps.llmName,
       model: deps.llmModel,
@@ -84,16 +86,19 @@ async function handle(
     return;
   }
 
-  if (path === "/api/conversations" && method === "POST") {
-    const body = asObject(await readJson(req, deps.config.jsonBodyMaxBytes));
-    const title = body.title === undefined ? undefined : asString(body.title, "title");
-    const conversation = await deps.conversations.create(title);
-    sendJson(res, 201, conversation.meta);
-    return;
-  }
-  if (path === "/api/conversations" && method === "GET") {
-    sendJson(res, 200, await deps.conversations.list());
-    return;
+  if (path === "/api/conversations") {
+    if (method === "POST") {
+      const body = asObject(await readJson(req, deps.config.jsonBodyMaxBytes));
+      const title = body.title === undefined ? undefined : asString(body.title, "title");
+      const conversation = await deps.conversations.create(title);
+      sendJson(res, 201, conversation.meta);
+      return;
+    }
+    if (method === "GET") {
+      sendJson(res, 200, await deps.conversations.list());
+      return;
+    }
+    throw methodNotAllowed(method, path);
   }
 
   const conversationMatch = /^\/api\/conversations\/([^/]+)$/.exec(path);
@@ -110,36 +115,42 @@ async function handle(
       sendJson(res, 200, await deps.conversations.rename(id, title));
       return;
     }
-    throw new AppError("METHOD_NOT_ALLOWED", `Method ${method} is not allowed.`, { path });
+    throw methodNotAllowed(method, path);
   }
 
   const messagesMatch = /^\/api\/conversations\/([^/]+)\/messages$/.exec(path);
-  if (messagesMatch && method === "POST") {
+  if (messagesMatch) {
+    if (method !== "POST") throw methodNotAllowed(method, path);
     const id = decodeURIComponent(messagesMatch[1]!);
     await streamAgent(req, res, deps, { conversationId: id });
     return;
   }
-  if (path === "/api/messages" && method === "POST") {
+  if (path === "/api/messages") {
+    if (method !== "POST") throw methodNotAllowed(method, path);
     await streamAgent(req, res, deps, {});
     return;
   }
 
-  if (path === "/api/uploads" && method === "POST") {
+  if (path === "/api/uploads") {
+    if (method !== "POST") throw methodNotAllowed(method, path);
     await handleUpload(req, res, deps);
     return;
   }
 
-  if (path === "/api/papers" && method === "GET") {
+  if (path === "/api/papers") {
+    if (method !== "GET") throw methodNotAllowed(method, path);
     sendJson(res, 200, await deps.library.listPapers());
     return;
   }
   const paperMatch = /^\/api\/papers\/([^/]+)$/.exec(path);
-  if (paperMatch && method === "GET") {
+  if (paperMatch) {
+    if (method !== "GET") throw methodNotAllowed(method, path);
     sendJson(res, 200, await deps.library.getPaper(decodeURIComponent(paperMatch[1]!)));
     return;
   }
   const fileMatch = /^\/api\/papers\/([^/]+)\/attachments\/([^/]+)\/file$/.exec(path);
-  if (fileMatch && method === "GET") {
+  if (fileMatch) {
+    if (method !== "GET") throw methodNotAllowed(method, path);
     const bytes = await deps.library.readAttachmentBytes(
       decodeURIComponent(fileMatch[1]!),
       decodeURIComponent(fileMatch[2]!),
@@ -154,7 +165,8 @@ async function handle(
     return;
   }
   const noteMatch = /^\/api\/papers\/([^/]+)\/note$/.exec(path);
-  if (noteMatch && method === "GET") {
+  if (noteMatch) {
+    if (method !== "GET") throw methodNotAllowed(method, path);
     const view = await deps.notes.readNote(decodeURIComponent(noteMatch[1]!));
     if (url.searchParams.get("format") === "raw") {
       res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
@@ -166,9 +178,6 @@ async function handle(
   }
 
   if (path.startsWith("/api/")) {
-    if (method !== "GET" && method !== "POST" && method !== "PATCH") {
-      throw new AppError("METHOD_NOT_ALLOWED", `Method ${method} is not allowed.`, { path });
-    }
     throw new AppError("NOT_FOUND", `No route for ${path}.`, { path });
   }
 
@@ -176,7 +185,11 @@ async function handle(
     await serveStatic(res, path);
     return;
   }
-  throw new AppError("METHOD_NOT_ALLOWED", `Method ${method} is not allowed.`, { path });
+  throw methodNotAllowed(method, path);
+}
+
+function methodNotAllowed(method: string, path: string): AppError {
+  return new AppError("METHOD_NOT_ALLOWED", `Method ${method} is not allowed.`, { path });
 }
 
 async function handleUpload(
@@ -227,12 +240,7 @@ async function streamAgent(
   let fullPrompt = prompt;
   if (body.upload_id !== undefined) {
     const uploadId = asString(body.upload_id, "upload_id");
-    const upload = await deps.uploads.get(uploadId as never);
-    if (!upload) {
-      throw new AppError("INVALID_UPLOAD", `Upload ${uploadId} was not found or has expired.`, {
-        upload_id: uploadId,
-      });
-    }
+    const upload = await deps.library.requireStagedUpload(uploadId);
     fullPrompt = `${prompt}\n\n[staged upload] upload_id=${upload.upload_id}, original_filename="${upload.original_filename}", byte_size=${upload.byte_size}`;
   }
 

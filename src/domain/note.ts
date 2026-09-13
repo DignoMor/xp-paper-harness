@@ -52,6 +52,15 @@ export function parseNote(raw: string): ParsedNote {
     throw new AppError("CORRUPT_CATALOG", "Paper Note frontmatter must be a mapping.", {});
   }
   const record = parsed as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    if (key !== "paper_id" && key !== "title" && key !== "doi") {
+      throw new AppError(
+        "CORRUPT_CATALOG",
+        `Paper Note frontmatter contains an unsupported field "${key}".`,
+        { reason: "unknown_frontmatter_field", field: key },
+      );
+    }
+  }
   const paperId = record.paper_id;
   const title = record.title;
   if (typeof paperId !== "string" || typeof title !== "string") {

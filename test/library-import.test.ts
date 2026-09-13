@@ -149,11 +149,11 @@ describe("Library import (ticket #5)", () => {
 
   it("rejects invalid and expired upload ids and invalid paper ids", async () => {
     await expect(h.library.importPaper({ upload_id: "not-an-upload" })).rejects.toMatchObject({
-      code: "INVALID_UPLOAD",
+      code: "INVALID_ID",
     });
     await expect(
       h.library.importPaper({ upload_id: `upl_${uuidv7()}` }),
-    ).rejects.toMatchObject({ code: "INVALID_UPLOAD" });
+    ).rejects.toMatchObject({ code: "UPLOAD_EXPIRED" });
     await expect(h.library.getPaper("not-a-paper")).rejects.toMatchObject({
       code: "INVALID_ID",
     });

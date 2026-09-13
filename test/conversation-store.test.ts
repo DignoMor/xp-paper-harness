@@ -110,8 +110,8 @@ describe("ConversationStore", () => {
     it("truncates long prompts to 60 characters with an ellipsis", () => {
       const prompt = "a".repeat(100);
       const title = store.defaultTitleFromPrompt(prompt);
-      expect(title).toBe(`${"a".repeat(60)}…`);
-      expect(title.length).toBe(61);
+      expect(title).toBe(`${"a".repeat(59)}…`);
+      expect(title.length).toBe(60);
     });
 
     it("falls back when there is no usable text", () => {

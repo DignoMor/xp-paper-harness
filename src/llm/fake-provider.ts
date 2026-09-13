@@ -50,21 +50,26 @@ export class FakeLlmProvider implements LlmProvider {
     return this.index;
   }
 
-  private nextTurn(request: LlmChatRequest): { turn: FakeTurn; turnIndex: number } {
+  private nextTurn(
+    request: LlmChatRequest,
+  ): { turn: FakeTurn | undefined; turnIndex: number } {
     const turnIndex = this.index;
     const turn = this.handler?.(request, turnIndex) ?? this.script[turnIndex];
     this.index += 1;
-    if (!turn) {
-      throw new Error(
-        `FakeLlmProvider: no scripted turn available at index ${turnIndex}`,
-      );
-    }
     return { turn, turnIndex };
   }
 
   async *stream(request: LlmChatRequest): AsyncIterable<LlmEvent> {
     throwIfAborted(request.signal);
     const { turn, turnIndex } = this.nextTurn(request);
+    if (!turn) {
+      yield {
+        type: "error",
+        code: "PROVIDER_FAILURE",
+        message: `FakeLlmProvider: no scripted turn available at index ${turnIndex}`,
+      };
+      return;
+    }
 
     const text = turn.text ?? "";
     for (const delta of chunkText(text, this.chunkSize)) {

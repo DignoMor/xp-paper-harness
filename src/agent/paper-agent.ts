@@ -129,7 +129,6 @@ export class PaperAgent {
 
       if (providerFailed) {
         await this.appendAssistant(conversation.conversation_id, assistantText, toolCalls);
-        yield { type: "done", conversation_id: conversation.conversation_id, title: conversation.title };
         return;
       }
 

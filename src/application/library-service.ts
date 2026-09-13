@@ -3,7 +3,7 @@ import { basename, extname } from "node:path";
 import { AppError } from "../domain/errors.js";
 import { normalizeDoi } from "../domain/doi.js";
 import type { AttachmentId, IdGenerator, PaperId, UploadId } from "../domain/ids.js";
-import { isAttachmentId, isPaperId } from "../domain/ids.js";
+import { isAttachmentId, isPaperId, isUploadId } from "../domain/ids.js";
 import { applyAttachmentMetadataPatch, applyPaperMetadataPatch } from "../domain/metadata.js";
 import {
   emptyMetadata,
@@ -26,6 +26,7 @@ import type {
   NoteStore,
   PdfExtraction,
   PdfReaderPort,
+  StagedUpload,
   UploadStore,
 } from "./ports.js";
 import { atomicWriteFile, ensureDir, removeIfExists, sha256Hex } from "../infrastructure/fs/atomic.js";
@@ -126,14 +127,20 @@ export class LibraryService {
     }
   }
 
-  async importPaper(input: ImportPaperInput): Promise<ImportResult> {
-    const uploadId = this.requireUploadId(input.upload_id);
+  async requireStagedUpload(uploadIdRaw: string): Promise<StagedUpload> {
+    const uploadId = this.requireUploadId(uploadIdRaw);
     const upload = await this.deps.uploads.get(uploadId);
     if (!upload) {
-      throw new AppError("INVALID_UPLOAD", `Upload ${uploadId} was not found or has expired.`, {
+      throw new AppError("UPLOAD_EXPIRED", `Upload ${uploadId} is no longer available.`, {
         upload_id: uploadId,
       });
     }
+    return upload;
+  }
+
+  async importPaper(input: ImportPaperInput): Promise<ImportResult> {
+    const upload = await this.requireStagedUpload(input.upload_id);
+    const uploadId = upload.upload_id;
     const bytes = await this.deps.uploads.readBytes(uploadId);
     if (!bytes) {
       throw new AppError("INVALID_UPLOAD", `Upload ${uploadId} could not be read.`, {
@@ -159,36 +166,33 @@ export class LibraryService {
     const metadata = this.buildImportMetadata(input.metadata, extraction.embedded_title, upload.original_filename);
 
     const doi = normalizeDoi(metadata.doi);
-    if (doi) {
+    if (input.mode === "attach") {
+      if (!input.existing_paper_id) {
+        throw new AppError(
+          "INVALID_INPUT",
+          "An explicit existing_paper_id is required to attach to an existing Paper.",
+          doi ? { doi } : {},
+        );
+      }
+      return this.attachExisting(input.existing_paper_id, uploadId, bytes, sha256, extraction, {
+        title: upload.original_filename,
+      }, input.expected_revision);
+    }
+    if (input.mode !== "new" && doi) {
       const matches = findByDoi(catalog, doi);
-      const choice = input.mode;
-      if (choice !== "new") {
-        if (choice === "attach") {
-          if (!input.existing_paper_id) {
-            throw new AppError(
-              "INVALID_INPUT",
-              "An explicit existing_paper_id is required to attach to an existing Paper.",
-              { doi },
-            );
-          }
-          return this.attachExisting(input.existing_paper_id, uploadId, bytes, sha256, extraction, {
-            title: upload.original_filename,
-          }, input.expected_revision);
-        }
-        if (matches.length > 0) {
-          throw new AppError(
-            "DOI_COLLISION",
-            "A Paper with the same DOI already exists; choose new_paper or attach.",
-            {
-              doi,
-              candidates: matches.map((m) => ({
-                paper_id: m.paper_id,
-                title: m.metadata.title,
-                doi: m.metadata.doi ?? null,
-              })),
-            },
-          );
-        }
+      if (matches.length > 0) {
+        throw new AppError(
+          "DOI_COLLISION",
+          "A Paper with the same DOI already exists; choose new_paper or attach.",
+          {
+            doi,
+            candidates: matches.map((m) => ({
+              paper_id: m.paper_id,
+              title: m.metadata.title,
+              doi: m.metadata.doi ?? null,
+            })),
+          },
+        );
       }
     }
 
@@ -205,13 +209,8 @@ export class LibraryService {
 
   async addAttachment(input: AddAttachmentInput): Promise<PaperDetail> {
     const paperId = this.requirePaperId(input.paper_id);
-    const uploadId = this.requireUploadId(input.upload_id);
-    const upload = await this.deps.uploads.get(uploadId);
-    if (!upload) {
-      throw new AppError("INVALID_UPLOAD", `Upload ${uploadId} was not found or has expired.`, {
-        upload_id: uploadId,
-      });
-    }
+    const upload = await this.requireStagedUpload(input.upload_id);
+    const uploadId = upload.upload_id;
     const bytes = await this.deps.uploads.readBytes(uploadId);
     if (!bytes) {
       throw new AppError("INVALID_UPLOAD", `Upload ${uploadId} could not be read.`, {
@@ -579,12 +578,12 @@ export class LibraryService {
   }
 
   private requireUploadId(value: string): UploadId {
-    if (typeof value !== "string" || !value.startsWith("upl_")) {
-      throw new AppError("INVALID_UPLOAD", `"${value}" is not a valid upload ID.`, {
+    if (!isUploadId(value)) {
+      throw new AppError("INVALID_ID", `"${value}" is not a valid Upload ID.`, {
         upload_id: value,
       });
     }
-    return value as UploadId;
+    return value;
   }
 }
 

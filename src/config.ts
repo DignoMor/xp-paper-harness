@@ -1,4 +1,4 @@
-import { isAbsolute, resolve } from "node:path";
+import { isAbsolute } from "node:path";
 import { AppError } from "./domain/errors.js";
 
 export interface LlmEnvConfig {
@@ -43,7 +43,14 @@ export function loadConfig(env: Env = process.env): AppConfig {
       { env: "PAPER_HARNESS_DATA_ROOT" },
     );
   }
-  const dataRoot = isAbsolute(rawRoot) ? rawRoot : resolve(process.cwd(), rawRoot);
+  if (!isAbsolute(rawRoot)) {
+    throw new AppError(
+      "INVALID_INPUT",
+      "PAPER_HARNESS_DATA_ROOT must be an absolute path.",
+      { env: "PAPER_HARNESS_DATA_ROOT" },
+    );
+  }
+  const dataRoot = rawRoot;
   return {
     dataRoot,
     host: env.PAPER_HARNESS_HOST ?? "0.0.0.0",

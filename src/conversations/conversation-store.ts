@@ -209,7 +209,7 @@ export class ConversationStore {
     const collapsed = firstLine.trim().replace(/\s+/g, " ");
     if (collapsed === "") return DEFAULT_CONVERSATION_TITLE;
     if (collapsed.length > MAX_TITLE_LENGTH) {
-      return `${collapsed.slice(0, MAX_TITLE_LENGTH)}…`;
+      return `${collapsed.slice(0, MAX_TITLE_LENGTH - 1)}…`;
     }
     return collapsed;
   }

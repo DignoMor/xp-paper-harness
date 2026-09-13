@@ -130,6 +130,62 @@ describe("Paper metadata and duplicates (ticket #8)", () => {
     expect(await h.library.listPapers()).toHaveLength(2);
   });
 
+  it("attaches with mode attach when no DOI is supplied", async () => {
+    const paper = await importPaper(h, textBytes("attach no doi base"), "base.pdf");
+
+    const upload = await h.stage(textBytes("attach no doi body"), "supplement.pdf");
+    const attached = await h.library.importPaper({
+      upload_id: upload,
+      mode: "attach",
+      existing_paper_id: paper.paper_id,
+    });
+
+    expect(attached.imported_as).toBe("attachment");
+    expect(attached.paper.paper_id).toBe(paper.paper_id);
+    expect(attached.paper.attachments).toHaveLength(2);
+  });
+
+  it("attaches with mode attach when the DOI matches no existing paper", async () => {
+    const paper = await importPaper(h, textBytes("attach unknown doi base"), "base.pdf");
+
+    const upload = await h.stage(textBytes("attach unknown doi body"), "supplement.pdf");
+    const attached = await h.library.importPaper({
+      upload_id: upload,
+      metadata: { doi: "10.9/never-seen" },
+      mode: "attach",
+      existing_paper_id: paper.paper_id,
+    });
+
+    expect(attached.imported_as).toBe("attachment");
+    expect(attached.paper.paper_id).toBe(paper.paper_id);
+    expect(attached.paper.attachments).toHaveLength(2);
+  });
+
+  it("creates a new paper with mode new despite a DOI collision", async () => {
+    const first = await importPaper(h, textBytes("mode new collision base"), "base.pdf", {
+      doi: "10.1/z",
+    });
+
+    const upload = await h.stage(textBytes("mode new collision body"), "new.pdf");
+    const created = await h.library.importPaper({
+      upload_id: upload,
+      metadata: { doi: "10.1/z" },
+      mode: "new",
+    });
+
+    expect(created.imported_as).toBe("new_paper");
+    expect(created.paper.paper_id).not.toBe(first.paper_id);
+    expect(await h.library.listPapers()).toHaveLength(2);
+  });
+
+  it("rejects mode attach without an existing_paper_id", async () => {
+    const upload = await h.stage(textBytes("missing existing id body"), "missing.pdf");
+
+    await expect(
+      h.library.importPaper({ upload_id: upload, mode: "attach" }),
+    ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+  });
+
   it("rejects byte-identical content anywhere in the library", async () => {
     const shared = textBytes("byte identical payload");
     const first = await importPaper(h, shared, "one.pdf");

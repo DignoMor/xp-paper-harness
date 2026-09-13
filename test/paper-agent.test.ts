@@ -188,7 +188,7 @@ describe("PaperAgent", () => {
     }
   });
 
-  it("ends with an error and done on a provider error, without executing tools", async () => {
+  it("ends with a provider error, without executing tools or emitting done", async () => {
     const provider: LlmProvider = {
       name: "erroring",
       defaultModel: "test-model",
@@ -222,7 +222,8 @@ describe("PaperAgent", () => {
           event.type === "error",
       );
       expect(errorEvent).toMatchObject({ code: "PROVIDER_FAILURE" });
-      expect(events.at(-1)).toMatchObject({ type: "done" });
+      expect(events.at(-1)).toMatchObject({ type: "error" });
+      expect(events.some((event) => event.type === "done")).toBe(false);
       expect(events.some((event) => event.type === "tool_result")).toBe(false);
 
       const history = await harness.conversations.history(conversationIdOf(events));

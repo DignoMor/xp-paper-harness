@@ -80,7 +80,6 @@ export class OpenCodeGoProvider implements LlmProvider {
         code: "PROVIDER_FAILURE",
         message: CREDENTIALS_MISSING_MESSAGE,
       };
-      yield { type: "done", finish_reason: "error" };
       return;
     }
 
@@ -116,7 +115,6 @@ export class OpenCodeGoProvider implements LlmProvider {
         code: "PROVIDER_FAILURE",
         message: "Unable to reach the OpenCode Go service.",
       };
-      yield { type: "done", finish_reason: "error" };
       return;
     }
 
@@ -126,7 +124,6 @@ export class OpenCodeGoProvider implements LlmProvider {
         code: "PROVIDER_FAILURE",
         message: `OpenCode Go request failed (HTTP ${response.status}).`,
       };
-      yield { type: "done", finish_reason: "error" };
       return;
     }
 
@@ -137,7 +134,6 @@ export class OpenCodeGoProvider implements LlmProvider {
         code: "PROVIDER_FAILURE",
         message: "OpenCode Go returned an empty response body.",
       };
-      yield { type: "done", finish_reason: "error" };
       return;
     }
 

@@ -652,12 +652,7 @@ describe("Paper Harness v1 acceptance (ticket #11)", () => {
       expect(repaired.summary.repaired).toBeGreaterThanOrEqual(1);
       expect(repaired.repaired.some((issue: any) => issue.code === "NOTE_MISSING")).toBe(true);
       expect(existsSync(notePath)).toBe(true);
-      // PRODUCT BUG (reported, not patched): a successful repair restores the
-      // note but still reports the repaired issue in `summary.errors`, so the
-      // process exits 2 instead of 0. The public contract (README.md:114 and
-      // src/cli/reconcile.ts:45) is "0 when no errors remain". Soft assertion so
-      // the remaining acceptance steps still execute and are validated.
-      expect.soft(repairReport.result).toBe(0);
+      expect(repairReport.result).toBe(0);
 
       const deepReport = await captureStdout(() =>
         runReconcileCli(["--data-root", dir, "--json", "--deep"], env),
