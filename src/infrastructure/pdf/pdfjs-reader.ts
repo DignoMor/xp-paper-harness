@@ -108,7 +108,7 @@ export class PdfjsReader implements PdfReaderPort {
     let loadingTask: ReturnType<PdfJsModule["getDocument"]> | null = null;
     try {
       loadingTask = pdfjs.getDocument({
-        data: bytes,
+        data: new Uint8Array(bytes),
         useSystemFonts: true,
         isEvalSupported: false,
         disableFontFace: true,
