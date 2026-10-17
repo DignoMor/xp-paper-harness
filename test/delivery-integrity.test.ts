@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createTestHarness, textBytes, type TestHarness } from './helpers/harness.js';
 import { FileSystemCatalogStore } from '../src/infrastructure/fs/catalog-store.js';
@@ -47,6 +47,7 @@ it('reports stored path mismatches and nested orphans with arbitrary names', asy
   await writeFile(join(h.paths.notesDir(), 'legacy.md'), 'orphan note');
   const report = await h.reconciliation.reconcile();
   expect(report.issues.map(i => i.code)).toEqual(expect.arrayContaining(['ATTACHMENT_PATH_MISMATCH', 'ORPHAN_PDF', 'ORPHAN_NOTE']));
+  expect(report.issues.find(i => i.code === 'ORPHAN_PDF')?.detail).toBe('papers/legacy/nested/lost.PDF');
 });
 it.each(['note', 'catalog'])('rolls back a failed %s publication and retains the upload', async phase => {
   const upload = await h.stage(textBytes('failed import'));

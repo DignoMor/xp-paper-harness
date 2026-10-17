@@ -1,5 +1,5 @@
 import { readdir, readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { AppError, isAppError } from "../domain/errors.js";
 import { emptyCatalog, parseCatalog, type Catalog } from "../domain/catalog.js";
 import { isAttachmentId, isPaperId } from "../domain/ids.js";
@@ -264,6 +264,7 @@ export class ReconciliationService {
         const attachmentCandidate = entry.name.slice(0, -4);
         issues.push({ severity: "warning", code: kind === "note" ? "ORPHAN_NOTE" : "ORPHAN_PDF",
           message: `An unreferenced ${kind === "note" ? "Paper Note" : "PDF"} was found.`,
+          detail: relative(this.deps.paths.root, path),
           paper_id: isPaperId(paperCandidate) ? paperCandidate : undefined,
           attachment_id: kind === "pdf" && isAttachmentId(attachmentCandidate) ? attachmentCandidate : undefined,
           repairable: false });
