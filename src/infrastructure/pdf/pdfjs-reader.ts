@@ -1,3 +1,4 @@
+import type { PaperMetadata } from "../../domain/paper.js";
 import { createRequire } from "node:module";
 import type {
   PdfExtraction,
@@ -148,16 +149,49 @@ export class PdfjsReader implements PdfReaderPort {
   ): Promise<PdfExtraction> {
     const numPages = doc.numPages;
 
-    let embeddedTitle: string | null = null;
+    let metadata: Partial<PaperMetadata> = {};
     try {
-      const metadata = await doc.getMetadata();
-      const rawTitle = (metadata?.info as { Title?: unknown } | undefined)?.Title;
-      if (typeof rawTitle === "string" && rawTitle.trim().length > 0) {
-        embeddedTitle = rawTitle.trim();
+      const embedded = await doc.getMetadata();
+      const rawInfo = embedded.info as Record<string, unknown>;
+      const info = { ...(rawInfo.Custom as Record<string, unknown> | undefined), ...rawInfo };
+      const xmp = embedded.metadata;
+      const text = (...values: unknown[]): string | undefined => {
+        for (const value of values) {
+          if (typeof value === "string" && value.trim()) return value.trim();
+          if (Array.isArray(value)) {
+            const found = value.find((item): item is string => typeof item === "string" && item.trim() !== "");
+            if (found) return found.trim();
+          }
+        }
+        return undefined;
+      };
+      const fields: Array<[keyof PaperMetadata, string[], string[]]> = [
+        ["title", ["dc:title"], ["Title"]],
+        ["abstract_note", ["dc:description"], ["Subject"]],
+        ["publication_title", ["prism:publicationname"], ["PublicationTitle", "Journal"]],
+        ["volume", ["prism:volume"], ["Volume"]],
+        ["issue", ["prism:number"], ["Issue"]],
+        ["pages", ["prism:pagerange"], ["Pages"]],
+        ["date", ["prism:publicationdate", "dc:date"], ["Date"]],
+        ["doi", ["prism:doi"], ["DOI"]],
+        ["url", ["prism:url"], ["URL"]],
+      ];
+      for (const [field, xmpNames, infoNames] of fields) {
+        const value = text(...xmpNames.map(name => xmp?.get(name)), ...infoNames.map(name => info[name]));
+        if (value) Object.assign(metadata, { [field]: value });
       }
+      const author = xmp?.get("dc:creator") ?? info.Author;
+      const authors = Array.isArray(author) ? author : typeof author === "string" ? author.split(";") : [];
+      const names = authors.filter((value): value is string => typeof value === "string" && value.trim() !== "");
+      if (names.length) metadata.creators = names.map(name => ({ creator_type: "author", name: name.trim() }));
+      const keywords = xmp?.get("dc:subject") ?? info.Keywords;
+      const tags = Array.isArray(keywords) ? keywords : typeof keywords === "string" ? keywords.split(/[,;]/) : [];
+      const cleanTags = tags.filter((value): value is string => typeof value === "string" && value.trim() !== "").map(value => value.trim());
+      if (cleanTags.length) metadata.tags = cleanTags;
     } catch {
-      embeddedTitle = null;
+      // Metadata is optional; extraction and registration must still succeed.
     }
+    const embeddedTitle = metadata.title ?? null;
 
     const selection = normalizeSelection(limits.pages, numPages);
     const limited = selection.slice(0, Math.max(0, limits.maxPages));
@@ -203,6 +237,7 @@ export class PdfjsReader implements PdfReaderPort {
       page_count: numPages,
       pages: extracted,
       embedded_title: embeddedTitle,
+      metadata,
       truncated: { bytes: false, pages: pagesTruncated, chars: charsTruncated },
       continuation,
       error: null,

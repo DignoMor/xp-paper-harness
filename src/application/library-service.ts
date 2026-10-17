@@ -163,7 +163,7 @@ export class LibraryService {
     }
 
     const extraction = await this.safeExtract(bytes, { maxPages: 1, maxChars: 5000 });
-    const metadata = this.buildImportMetadata(input.metadata, extraction.embedded_title, upload.original_filename);
+    const metadata = this.buildImportMetadata(input.metadata, extraction, upload.original_filename);
 
     const doi = normalizeDoi(metadata.doi);
     if (input.mode === "attach") {
@@ -487,23 +487,24 @@ export class LibraryService {
 
   private buildImportMetadata(
     input: Record<string, unknown> | undefined,
-    embeddedTitle: string | null,
+    extraction: PdfExtraction,
     originalFilename: string,
   ): PaperMetadata {
     const fallback = titleFromFilename(originalFilename);
     const metadata = emptyMetadata(fallback);
-    const providedTitle =
-      input && typeof input.title === "string" ? input.title : undefined;
-    if (input !== undefined) {
-      this.applyMetadataInput(metadata, input);
+    if (input !== undefined) this.applyMetadataInput(metadata, input);
+    const extracted = { title: extraction.embedded_title, ...extraction.metadata };
+    const draft = { ...metadata } as Record<string, unknown>;
+    for (const field of PAPER_METADATA_FIELDS) {
+      const supplied = input?.[field];
+      const empty = supplied === undefined || supplied === null ||
+        (typeof supplied === "string" && supplied.trim() === "") ||
+        (Array.isArray(supplied) && supplied.length === 0);
+      const value = extracted[field as keyof typeof extracted];
+      if (empty && value !== undefined && value !== null && value !== "") draft[field] = typeof value === "string" ? value.trim() : value;
     }
-    if (providedTitle !== undefined) {
-      metadata.title = providedTitle;
-    } else if (embeddedTitle && embeddedTitle.trim() !== "") {
-      metadata.title = embeddedTitle.trim();
-    }
-    if (metadata.title.trim() === "") metadata.title = embeddedTitle?.trim() || fallback;
-    return metadata;
+    if (typeof draft.title !== "string" || draft.title.trim() === "") draft.title = fallback;
+    return validateMetadata(draft, "metadata");
   }
 
   private applyMetadataInput(metadata: PaperMetadata, input: Record<string, unknown>): void {

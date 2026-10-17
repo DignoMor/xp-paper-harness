@@ -1,4 +1,5 @@
 import type { Readable } from "node:stream";
+import type { PaperMetadata } from "../domain/paper.js";
 import type { Catalog } from "../domain/catalog.js";
 import type { AttachmentId, PaperId, UploadId } from "../domain/ids.js";
 import type { ManagedFrontmatter, ParsedNote } from "../domain/note.js";
@@ -71,6 +72,7 @@ export interface PdfExtraction {
   page_count: number | null;
   pages: PdfPage[];
   embedded_title: string | null;
+  metadata?: Partial<PaperMetadata>;
   truncated: { bytes: boolean; pages: boolean; chars: boolean };
   continuation: { next_page: number } | null;
   error: string | null;
