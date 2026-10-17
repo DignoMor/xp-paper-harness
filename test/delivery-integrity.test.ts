@@ -78,3 +78,11 @@ it('concurrent imports cannot register the same bytes twice', async () => {
   expect(results.filter(r => r.status === 'fulfilled')).toHaveLength(1);
   expect(results.find(r => r.status === 'rejected')).toMatchObject({ reason: { code: 'DUPLICATE_HASH' } });
 });
+it('rejects one of two Catalog metadata edits sharing an expected revision', async () => {
+  const p = await paper();
+  const revision = await h.library.getCatalogRevision();
+  const outcomes = await Promise.allSettled(['first', 'second'].map(title => h.library.updatePaperMetadata(p.paper_id, { title }, revision)));
+  expect(outcomes.filter(r => r.status === 'fulfilled')).toHaveLength(1);
+  expect(outcomes.find(r => r.status === 'rejected')).toMatchObject({ reason: { code: 'STALE_REVISION' } });
+  expect(await h.library.getCatalogRevision()).toBe(revision + 1);
+});
