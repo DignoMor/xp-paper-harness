@@ -53,7 +53,7 @@ export function loadConfig(env: Env = process.env): AppConfig {
   const dataRoot = rawRoot;
   return {
     dataRoot,
-    host: env.PAPER_HARNESS_HOST ?? "0.0.0.0",
+    host: env.PAPER_HARNESS_HOST ?? "127.0.0.1",
     port: intEnv(env, "PAPER_HARNESS_PORT", 8787),
     llm: {
       provider: env.LLM_PROVIDER ?? "opencode-go",

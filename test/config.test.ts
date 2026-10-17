@@ -38,7 +38,7 @@ describe("loadConfig", () => {
 
   it("applies documented defaults", () => {
     const config = loadConfig({ PAPER_HARNESS_DATA_ROOT: join(tmpdir(), "paper-harness-config") });
-    expect(config.host).toBe("0.0.0.0");
+    expect(config.host).toBe("127.0.0.1");
     expect(config.port).toBe(8787);
     expect(config.logLevel).toBe("info");
     expect(config.llm.provider).toBe("opencode-go");
