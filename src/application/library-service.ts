@@ -470,7 +470,7 @@ export class LibraryService {
       throw error;
     }
     await this.deps.uploads.remove(input.uploadId);
-    const detail = paperToDetail(record);
+    const detail = await this.getPaper(paperId);
     return { paper: detail, note, imported_as: "new_paper" };
   }
 

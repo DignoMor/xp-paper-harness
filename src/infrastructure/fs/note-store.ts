@@ -34,11 +34,11 @@ export class FileSystemNoteStore implements NoteStore {
     paperId: PaperId,
     managed: ManagedFrontmatter,
     body: string,
-    expectedRaw?: string | null,
+    expectedRaw: string | null,
   ): Promise<ParsedNote> {
     return withFileLock(this.paths.noteFile(paperId), async () => {
       const current = await this.readRawFile(paperId);
-      if (expectedRaw !== undefined && current !== expectedRaw) {
+      if (current !== expectedRaw) {
         throw new AppError("STALE_REVISION", "The Paper Note changed; reread it and retry.", {});
       }
       await ensureDir(this.paths.notesDir());

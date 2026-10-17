@@ -129,13 +129,13 @@ export function createPaperTools(): AgentTool[] {
     },
     {
       name: "get_paper",
-      description: "Get full metadata and Attachment details for one Paper.",
+      description: "Get full metadata, Attachment details, and catalog_revision for revision-checked edits.",
       parameters: objectSchema({ paper_id: { type: "string" } }, ["paper_id"]),
       handler: async (args, ctx) => ctx.library.getPaper(requireStringArg(args, "paper_id")),
     },
     {
       name: "update_paper_metadata",
-      description: "Patch editable Paper Metadata fields. Identity and storage locations are immutable.",
+      description: "Patch editable Paper Metadata fields. Requires expected_revision from get_paper. Identity and storage locations are immutable.",
       parameters: objectSchema(
         {
           paper_id: { type: "string" },

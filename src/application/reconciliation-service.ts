@@ -123,7 +123,7 @@ export class ReconciliationService {
     }
     let exists = true;
     try {
-      await stat(filePath);
+      exists = (await stat(filePath)).isFile();
     } catch {
       exists = false;
     }
@@ -276,8 +276,9 @@ export class ReconciliationService {
   private async readNoteRaw(paperId: string): Promise<string | null> {
     try {
       return await readFile(this.deps.paths.noteFile(paperId as never), "utf8");
-    } catch {
-      return null;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
     }
   }
 

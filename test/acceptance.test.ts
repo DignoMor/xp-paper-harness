@@ -54,6 +54,7 @@ interface SseEvent {
 }
 
 interface HandlerState {
+  catalogRevision?: number;
   paperId?: string;
   primaryAttachmentId?: string;
   addedAttachmentId?: string;
@@ -100,6 +101,8 @@ function lastUserMessage(
 }
 
 function captureToolState(state: HandlerState, name: string, result: Record<string, any>): void {
+  const revision = result.catalog_revision ?? asRecord(result.paper).catalog_revision;
+  if (typeof revision === "number") state.catalogRevision = revision;
   if (name === "import_paper") {
     const paper = asRecord(result.paper);
     if (typeof paper.paper_id === "string") state.paperId = paper.paper_id;
@@ -208,7 +211,7 @@ function createMainHandler(state: HandlerState): FakeHandler {
         tool_calls: [
           {
             name: "set_primary_attachment",
-            arguments: { paper_id: state.paperId, attachment_id: state.addedAttachmentId },
+            arguments: { paper_id: state.paperId, attachment_id: state.addedAttachmentId, expected_revision: state.catalogRevision },
           },
         ],
       };
@@ -229,6 +232,7 @@ function createMainHandler(state: HandlerState): FakeHandler {
             arguments: {
               paper_id: state.paperId,
               patch: { title: "Renamed: Attention Is All You Need" },
+              expected_revision: state.catalogRevision,
             },
           },
         ],

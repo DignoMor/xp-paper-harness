@@ -26,7 +26,7 @@ export interface CatalogStore {
 
 export interface NoteStore {
   read(paperId: PaperId): Promise<ParsedNote | null>;
-  write(paperId: PaperId, managed: ManagedFrontmatter, body: string, expectedRaw?: string | null): Promise<ParsedNote>;
+  write(paperId: PaperId, managed: ManagedFrontmatter, body: string, expectedRaw: string | null): Promise<ParsedNote>;
   exists(paperId: PaperId): Promise<boolean>;
   listPaperIds(): Promise<PaperId[]>;
   remove(paperId: PaperId): Promise<void>;
