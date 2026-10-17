@@ -48,8 +48,10 @@ export function createWebServer(deps: WebServerDeps): WebServer {
   return {
     server,
     listen: () =>
-      new Promise<number>((resolvePromise) => {
+      new Promise<number>((resolvePromise, rejectPromise) => {
+        server.once("error", rejectPromise);
         server.listen(deps.config.port, deps.config.host, () => {
+          server.off("error", rejectPromise);
           const address = server.address();
           resolvePromise(typeof address === "object" && address ? address.port : deps.config.port);
         });
@@ -246,7 +248,7 @@ async function streamAgent(
 
   const controller = new AbortController();
   const onClose = () => controller.abort();
-  req.on("close", onClose);
+  res.on("close", onClose);
 
   res.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
@@ -272,12 +274,13 @@ async function streamAgent(
         });
     writeSse(res, { type: "error", code: appError.code, message: appError.message });
   } finally {
-    req.off("close", onClose);
+    res.off("close", onClose);
     res.end();
   }
 }
 
 function writeSse(res: ServerResponse, event: AgentEvent): void {
+  if (res.destroyed || res.writableEnded) return;
   res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
 }
 

@@ -1,3 +1,4 @@
+import { throwIfAborted } from "../llm/fake-provider.js";
 import type { LlmMessage, LlmProvider, LlmToolCall } from "../application/ports.js";
 import type {
   ConversationMessage,
@@ -48,6 +49,7 @@ export class PaperAgent {
       yield { type: "error", code: "INVALID_INPUT", message: "A prompt is required." };
       return;
     }
+    throwIfAborted(input.signal);
     let conversation: ConversationMeta;
     if (input.conversation_id) {
       const existing = await this.deps.conversations.get(input.conversation_id);
@@ -91,6 +93,7 @@ export class PaperAgent {
 
     let iterations = 0;
     while (true) {
+      throwIfAborted(input.signal);
       if (iterations >= this.maxToolIterations) {
         yield {
           type: "error",
@@ -113,6 +116,7 @@ export class PaperAgent {
         tools: toolSpecs,
         signal: input.signal,
       })) {
+        throwIfAborted(input.signal);
         if (event.type === "text") {
           assistantText += event.delta;
           yield { type: "text", delta: event.delta };
@@ -147,6 +151,7 @@ export class PaperAgent {
       }
 
       for (const call of toolCalls) {
+        throwIfAborted(input.signal);
         const outcome = await executeTool(
           this.tools,
           call.name,

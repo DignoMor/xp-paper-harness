@@ -307,3 +307,20 @@ describe("PaperAgent", () => {
     }
   });
 });
+
+it('does not execute a tool yielded after HTTP cancellation, even if the provider ignores its signal', async () => {
+  const harness = await createTestHarness();
+  try {
+    const controller = new AbortController();
+    const upload = await harness.stage(textBytes('cancelled import'));
+    const provider: LlmProvider = { name: 'ignores-abort', defaultModel: 'test', async *stream() {
+      controller.abort();
+      yield { type: 'tool_call', call: { id: 'cancelled', name: 'import_paper', arguments: JSON.stringify({ upload_id: upload }) } };
+      yield { type: 'done', finish_reason: 'tool_calls' };
+    } };
+    const agent = new PaperAgent({ provider, conversations: harness.conversations, services: { library: harness.library, notes: harness.noteService, reading: harness.reading, reconciliation: harness.reconciliation } });
+    await expect(collect(agent.run({ prompt: 'import', signal: controller.signal }))).rejects.toMatchObject({ name: 'AbortError' });
+    expect(await harness.library.listPapers()).toEqual([]);
+    expect(await harness.uploads.get(upload as never)).not.toBeNull();
+  } finally { await harness.cleanup(); }
+});
