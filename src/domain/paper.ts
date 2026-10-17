@@ -101,6 +101,7 @@ export interface PaperSummary {
 }
 
 export interface PaperDetail {
+  catalog_revision?: number;
   paper_id: PaperId;
   metadata: PaperMetadata;
   created_at: string;

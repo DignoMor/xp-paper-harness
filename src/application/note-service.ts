@@ -67,7 +67,7 @@ export class NoteService {
       );
     }
     const nextBody = applyEdit(note.body, input);
-    const written = await this.deps.notes.write(paperId, note.managed, nextBody);
+    const written = await this.deps.notes.write(paperId, note.managed, nextBody, note.raw);
     return toView(written);
   }
 

@@ -142,7 +142,7 @@ export function createPaperTools(): AgentTool[] {
           patch: { type: "object" },
           expected_revision: { type: "number" },
         },
-        ["paper_id", "patch"],
+        ["paper_id", "patch", "expected_revision"],
       ),
       handler: async (args, ctx) =>
         ctx.library.updatePaperMetadata(
@@ -161,7 +161,7 @@ export function createPaperTools(): AgentTool[] {
           patch: { type: "object" },
           expected_revision: { type: "number" },
         },
-        ["paper_id", "attachment_id", "patch"],
+        ["paper_id", "attachment_id", "patch", "expected_revision"],
       ),
       handler: async (args, ctx) =>
         ctx.library.updateAttachmentMetadata(
@@ -180,7 +180,7 @@ export function createPaperTools(): AgentTool[] {
           attachment_id: { type: "string" },
           expected_revision: { type: "number" },
         },
-        ["paper_id", "attachment_id"],
+        ["paper_id", "attachment_id", "expected_revision"],
       ),
       handler: async (args, ctx) =>
         ctx.library.setPrimaryAttachment(

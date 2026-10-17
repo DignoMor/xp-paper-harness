@@ -27,7 +27,7 @@ export function serializeNote(managed: ManagedFrontmatter, body: string): string
   };
   if (managed.doi) frontmatter.doi = managed.doi;
   const yamlText = yaml.dump(frontmatter, { lineWidth: 120, noRefs: true }).trimEnd();
-  return `---\n${yamlText}\n---\n\n${body.replace(/^\n+/, "")}`;
+  return `---\n${yamlText}\n---\n\n${body}`;
 }
 
 export function parseNote(raw: string): ParsedNote {

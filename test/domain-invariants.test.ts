@@ -132,7 +132,7 @@ describe("updatePaperMetadata without tags", () => {
 
     const updated = await harness.library.updatePaperMetadata(paper.paper_id, {
       title: "Renamed",
-    });
+    }, await harness.library.getCatalogRevision());
 
     expect(updated.metadata.title).toBe("Renamed");
     expect(updated.metadata.tags).toEqual(["existing"]);

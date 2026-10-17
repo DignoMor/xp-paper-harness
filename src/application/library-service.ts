@@ -90,7 +90,7 @@ export class LibraryService {
     const catalog = await this.deps.catalog.load();
     const paper = catalog.papers[paperId];
     if (!paper) throw new AppError("NOT_FOUND", `Paper ${paperId} was not found.`, { paper_id: paperId });
-    return paperToDetail(paper);
+    return { ...paperToDetail(paper), catalog_revision: catalog.revision };
   }
 
   async getPaperRecord(paperIdRaw: string): Promise<PaperRecord> {
@@ -204,6 +204,7 @@ export class LibraryService {
       metadata,
       originalFilename: upload.original_filename,
       expectedRevision: input.expected_revision,
+      allowDoiCollision: input.mode === "new",
     });
   }
 
@@ -249,6 +250,7 @@ export class LibraryService {
     try {
       await this.deps.catalog.transact((current) => {
         this.assertRevision(current, input.expected_revision);
+        this.assertUniqueHash(current, sha256);
         const target = current.papers[paperId];
         if (!target) throw new AppError("NOT_FOUND", `Paper ${paperId} was not found.`, { paper_id: paperId });
         const updated: PaperRecord = {
@@ -281,7 +283,7 @@ export class LibraryService {
     const paperId = this.requirePaperId(paperIdRaw);
     const attachmentId = this.requireAttachmentId(attachmentIdRaw);
     await this.deps.catalog.transact((current) => {
-      this.assertRevision(current, expectedRevision);
+      this.assertRevision(current, expectedRevision, true);
       const paper = current.papers[paperId];
       if (!paper) throw new AppError("NOT_FOUND", `Paper ${paperId} was not found.`, { paper_id: paperId });
       if (!paper.attachments[attachmentId]) {
@@ -313,8 +315,9 @@ export class LibraryService {
     expectedRevision?: number,
   ): Promise<PaperDetail> {
     const paperId = this.requirePaperId(paperIdRaw);
+    applyPaperMetadataPatch((await this.getPaperRecord(paperId)).metadata, patch);
     const updated = await this.deps.catalog.transact((current) => {
-      this.assertRevision(current, expectedRevision);
+      this.assertRevision(current, expectedRevision, true);
       const paper = current.papers[paperId];
       if (!paper) throw new AppError("NOT_FOUND", `Paper ${paperId} was not found.`, { paper_id: paperId });
       const metadata = applyPaperMetadataPatch(paper.metadata, patch);
@@ -344,8 +347,11 @@ export class LibraryService {
   ): Promise<PaperDetail> {
     const paperId = this.requirePaperId(paperIdRaw);
     const attachmentId = this.requireAttachmentId(attachmentIdRaw);
+    const record = await this.getPaperRecord(paperId);
+    const existing = record.attachments[attachmentId];
+    if (existing) applyAttachmentMetadataPatch(existing, patch);
     await this.deps.catalog.transact((current) => {
-      this.assertRevision(current, expectedRevision);
+      this.assertRevision(current, expectedRevision, true);
       const paper = current.papers[paperId];
       if (!paper) throw new AppError("NOT_FOUND", `Paper ${paperId} was not found.`, { paper_id: paperId });
       const attachment = paper.attachments[attachmentId];
@@ -406,6 +412,7 @@ export class LibraryService {
     extraction: PdfExtraction;
     metadata: PaperMetadata;
     originalFilename: string;
+    allowDoiCollision: boolean;
     expectedRevision?: number;
   }): Promise<ImportResult> {
     const paperId = this.ids.paperId();
@@ -439,9 +446,15 @@ export class LibraryService {
         paperId,
         { paper_id: paperId, title: record.metadata.title, doi: record.metadata.doi },
         "# Notes\n",
+        null,
       );
       await this.deps.catalog.transact((current) => {
         this.assertRevision(current, input.expectedRevision);
+        this.assertUniqueHash(current, input.sha256);
+        const doi = normalizeDoi(input.metadata.doi);
+        if (!input.allowDoiCollision && doi && findByDoi(current, doi).length) {
+          throw new AppError("DOI_COLLISION", "A matching DOI requires an explicit new or attach choice.", { doi });
+        }
         return {
           catalog: {
             schema_version: CATALOG_SCHEMA_VERSION,
@@ -469,7 +482,7 @@ export class LibraryService {
       title: paper.metadata.title,
       doi: paper.metadata.doi,
     };
-    await this.deps.notes.write(paper.paper_id, managed, note.body);
+    await this.deps.notes.write(paper.paper_id, managed, note.body, note.raw);
   }
 
   private buildImportMetadata(
@@ -551,8 +564,16 @@ export class LibraryService {
     }
   }
 
-  private assertRevision(catalog: Catalog, expected?: number): void {
-    if (expected === undefined) return;
+  private assertUniqueHash(catalog: Catalog, hash: string): void {
+    const duplicate = findDuplicateHash(catalog, hash);
+    if (duplicate) throw new AppError("DUPLICATE_HASH", "An identical Attachment already exists.", duplicate);
+  }
+
+  private assertRevision(catalog: Catalog, expected?: number, required = false): void {
+    if (expected === undefined && !required) return;
+    if (!Number.isSafeInteger(expected) || expected! < 0) {
+      throw new AppError("INVALID_INPUT", "A non-negative integer expected_revision is required.", { field: "expected_revision" });
+    }
     if (catalog.revision !== expected) {
       throw new AppError("STALE_REVISION", "The catalog revision is stale; reload and retry.", {
         expected_revision: expected,
