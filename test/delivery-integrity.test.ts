@@ -87,3 +87,18 @@ it('rejects one of two Catalog metadata edits sharing an expected revision', asy
   expect(outcomes.find(r => r.status === 'rejected')).toMatchObject({ reason: { code: 'STALE_REVISION' } });
   expect(await h.library.getCatalogRevision()).toBe(revision + 1);
 });
+it.each([
+  { schema_version: 999 },
+  { unexpected_field: 'must not disappear' },
+])('refuses invalid next Catalogs before serialization: %j', async patch => {
+  await paper();
+  const before = await readFile(h.paths.catalogFile(), 'utf8');
+  const catalog = await h.catalog.load();
+  await expect(h.catalog.save({ ...catalog, revision: catalog.revision + 1, ...patch } as never)).rejects.toBeInstanceOf(Error);
+  expect(await readFile(h.paths.catalogFile(), 'utf8')).toBe(before);
+});
+it.each(['{ broken', '{"schema_version":999,"revision":1,"papers":{}}', '{"schema_version":1,"revision":1,"papers":{},"unknown":true}'])('refuses to rewrite corrupt or unknown stored Catalogs', async raw => {
+  await writeFile(h.paths.catalogFile(), raw);
+  await expect(h.catalog.save({ schema_version: 1, revision: 2, papers: {} })).rejects.toBeInstanceOf(Error);
+  expect(await readFile(h.paths.catalogFile(), 'utf8')).toBe(raw);
+});

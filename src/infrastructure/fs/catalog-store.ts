@@ -56,7 +56,7 @@ export class FileSystemCatalogStore implements CatalogStore {
           current_revision: current.revision, expected_revision: catalog.revision - 1,
         });
       }
-      await atomicWriteFile(this.paths.catalogFile(), serializeCatalog(catalog));
+      await atomicWriteFile(this.paths.catalogFile(), serializeCatalog(parseCatalog(catalog)));
     });
   }
 
