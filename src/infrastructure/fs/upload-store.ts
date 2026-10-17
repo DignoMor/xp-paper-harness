@@ -65,7 +65,7 @@ export class FileSystemUploadStore implements UploadStore {
       await removeIfExists(tmpPath);
       if (error instanceof AppError) throw error;
       throw new AppError("INVALID_UPLOAD", "The upload stream failed before completion.", {
-        detail: error instanceof Error ? error.message : String(error),
+        reason: "interrupted_stream",
       });
     }
     if (byteSize === 0) {
@@ -74,7 +74,12 @@ export class FileSystemUploadStore implements UploadStore {
     }
     await ensureDir(this.paths.uploadsDir());
     const { rename } = await import("node:fs/promises");
-    await rename(tmpPath, this.dataFile(uploadId));
+    try {
+      await rename(tmpPath, this.dataFile(uploadId));
+    } catch (error) {
+      await removeIfExists(tmpPath);
+      throw error;
+    }
     const meta: UploadMeta = {
       upload_id: uploadId,
       original_filename: opts.originalFilename,
@@ -82,7 +87,12 @@ export class FileSystemUploadStore implements UploadStore {
       byte_size: byteSize,
       staged_at: stagedAt,
     };
-    await atomicWriteFile(this.metaFile(uploadId), `${JSON.stringify(meta, null, 2)}\n`);
+    try {
+      await atomicWriteFile(this.metaFile(uploadId), `${JSON.stringify(meta, null, 2)}\n`);
+    } catch (error) {
+      await removeIfExists(this.dataFile(uploadId));
+      throw error;
+    }
     return { ...meta, path: this.dataFile(uploadId) };
   }
 
@@ -141,13 +151,36 @@ export class FileSystemUploadStore implements UploadStore {
         purged += 1;
       }
     }
+    // An interrupted publication may have only one half of the upload pair,
+    // invalid metadata, or a streaming partial. Expire those by filesystem age.
+    const entries = await readdir(this.paths.uploadsDir()).catch((error) => {
+      if (isNotFound(error)) return [];
+      throw error;
+    });
+    for (const entry of entries) {
+      const candidate = entry.replace(/\.(pdf|meta\.json)$/, "");
+      const partial = /^\.upload-[0-9a-f]{16}\.part$/.test(entry);
+      if (!partial && !isUploadId(candidate)) continue;
+      if (!partial && await this.get(candidate as UploadId)) continue;
+      const path = join(this.paths.uploadsDir(), entry);
+      const info = await stat(path).catch(() => null);
+      if (info?.isFile() && info.mtimeMs < cutoff) {
+        await removeIfExists(path);
+        purged += 1;
+      }
+    }
     return purged;
   }
 
   private async readMeta(uploadId: UploadId): Promise<UploadMeta | null> {
     try {
       const raw = await readFile(this.metaFile(uploadId), "utf8");
-      return JSON.parse(raw) as UploadMeta;
+      const value = JSON.parse(raw) as UploadMeta;
+      if (value.upload_id !== uploadId || typeof value.original_filename !== "string" ||
+          value.media_type !== "application/pdf" || !Number.isSafeInteger(value.byte_size) ||
+          value.byte_size <= 0 || typeof value.staged_at !== "string" ||
+          !Number.isFinite(Date.parse(value.staged_at))) return null;
+      return value;
     } catch (error) {
       if (isNotFound(error)) return null;
       return null;

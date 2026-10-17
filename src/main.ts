@@ -1,4 +1,4 @@
-import { ensureDir } from "./infrastructure/fs/atomic.js";
+import { cleanupAtomicTemps, ensureDir } from "./infrastructure/fs/atomic.js";
 import { compose } from "./composition.js";
 import { loadConfig } from "./config.js";
 import { createWebServer } from "./web/server.js";
@@ -18,6 +18,7 @@ export async function startApplication(env: NodeJS.ProcessEnv = process.env): Pr
   ]) {
     await ensureDir(dir);
   }
+  await cleanupAtomicTemps(paths.root);
   const purged = await uploads.purgeExpired(config.upload.ttlMs);
   if (purged > 0) {
     process.stdout.write(`Purged ${purged} expired upload(s).\n`);
