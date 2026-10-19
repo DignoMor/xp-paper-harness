@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, open, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, open, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 
@@ -39,4 +39,25 @@ export function sha256Hex(data: Uint8Array): string {
 
 export function sha256String(data: string): string {
   return createHash("sha256").update(data, "utf8").digest("hex");
+}
+
+// Startup only: no operations can be publishing files while this runs. Never
+// follow symlinks or remove published Library artifacts.
+export async function cleanupAtomicTemps(root: string): Promise<number> {
+  let entries;
+  try { entries = await readdir(root, { withFileTypes: true }); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0;
+    throw error;
+  }
+  let removed = 0;
+  for (const entry of entries) {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) removed += await cleanupAtomicTemps(path);
+    else if (entry.isFile() && /^\.tmp-[0-9a-f]{16}$/.test(entry.name)) {
+      await rm(path);
+      removed += 1;
+    }
+  }
+  return removed;
 }

@@ -52,6 +52,7 @@ export function makeExtraction(overrides: Partial<PdfExtraction> = {}): PdfExtra
     page_count: overrides.page_count ?? pages.length,
     pages,
     embedded_title: overrides.embedded_title ?? null,
+    metadata: overrides.metadata,
     truncated: overrides.truncated ?? { bytes: false, pages: false, chars: false },
     continuation: overrides.continuation ?? null,
     error: overrides.error ?? null,

@@ -121,7 +121,7 @@ describe("Supplementary attachments (ticket #9)", () => {
       (attachment) => attachment.attachment_id !== formerPrimaryId,
     )!.attachment_id;
 
-    const detail = await h.library.setPrimaryAttachment(paper.paper_id, newPrimaryId);
+    const detail = await h.library.setPrimaryAttachment(paper.paper_id, newPrimaryId, await h.library.getCatalogRevision());
     expect(detail.primary_attachment_id).toBe(newPrimaryId);
     expect(detail.attachments).toHaveLength(2);
     expect(detail.attachments.filter((attachment) => attachment.primary)).toEqual([

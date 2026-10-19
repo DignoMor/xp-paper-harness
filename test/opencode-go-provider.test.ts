@@ -49,7 +49,10 @@ async function startMockServer(
       });
     });
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => { server.off("error", reject); resolve(); });
+  });
   const address = server.address() as AddressInfo;
   const mock: MockServer = {
     baseUrl: `http://127.0.0.1:${address.port}`,
@@ -248,13 +251,12 @@ describe("OpenCodeGoProvider", () => {
 
     const events = await collect(provider.stream(chatRequest()));
 
-    expect(events).toHaveLength(2);
+    expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ type: "error", code: "PROVIDER_FAILURE" });
     const message = (events[0] as { type: "error"; message: string }).message;
     expect(message).toContain("401");
     expect(message).not.toContain("test-key-123");
     expect(message).not.toContain("secret-body-token");
-    expect(events[1]).toEqual({ type: "done", finish_reason: "error" });
   });
 
   it("emits an error event on network failure without leaking the key", async () => {
@@ -268,10 +270,10 @@ describe("OpenCodeGoProvider", () => {
 
     const events = await collect(provider.stream(chatRequest()));
 
+    expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ type: "error", code: "PROVIDER_FAILURE" });
     const message = (events[0] as { type: "error"; message: string }).message;
     expect(message).not.toContain("test-key-123");
-    expect(events.at(-1)).toEqual({ type: "done", finish_reason: "error" });
   });
 
   it("reports missing credentials without attempting a request", async () => {
@@ -287,12 +289,13 @@ describe("OpenCodeGoProvider", () => {
     const events = await collect(provider.stream(chatRequest()));
 
     expect(called).toBe(false);
-    expect(events[0]).toEqual({
-      type: "error",
-      code: "PROVIDER_FAILURE",
-      message: CREDENTIALS_MISSING_MESSAGE,
-    });
-    expect(events.at(-1)).toEqual({ type: "done", finish_reason: "error" });
+    expect(events).toEqual([
+      {
+        type: "error",
+        code: "PROVIDER_FAILURE",
+        message: CREDENTIALS_MISSING_MESSAGE,
+      },
+    ]);
   });
 
   it("creates a provider from env and honors OPENCODE_GO_BASE_URL", async () => {
@@ -327,11 +330,13 @@ describe("OpenCodeGoProvider", () => {
   it("constructs from env with missing credentials and yields the config error", async () => {
     const provider = createOpenCodeGoProviderFromEnv({});
     const events = await collect(provider.stream(chatRequest()));
-    expect(events[0]).toEqual({
-      type: "error",
-      code: "PROVIDER_FAILURE",
-      message: CREDENTIALS_MISSING_MESSAGE,
-    });
+    expect(events).toEqual([
+      {
+        type: "error",
+        code: "PROVIDER_FAILURE",
+        message: CREDENTIALS_MISSING_MESSAGE,
+      },
+    ]);
   });
 
   it("honors a custom session header name", async () => {

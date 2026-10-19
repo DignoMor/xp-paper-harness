@@ -188,7 +188,7 @@ describe("PaperAgent", () => {
     }
   });
 
-  it("ends with an error and done on a provider error, without executing tools", async () => {
+  it("ends with a provider error, without executing tools or emitting done", async () => {
     const provider: LlmProvider = {
       name: "erroring",
       defaultModel: "test-model",
@@ -222,7 +222,8 @@ describe("PaperAgent", () => {
           event.type === "error",
       );
       expect(errorEvent).toMatchObject({ code: "PROVIDER_FAILURE" });
-      expect(events.at(-1)).toMatchObject({ type: "done" });
+      expect(events.at(-1)).toMatchObject({ type: "error" });
+      expect(events.some((event) => event.type === "done")).toBe(false);
       expect(events.some((event) => event.type === "tool_result")).toBe(false);
 
       const history = await harness.conversations.history(conversationIdOf(events));
@@ -305,4 +306,36 @@ describe("PaperAgent", () => {
       await harness.cleanup();
     }
   });
+});
+
+it('does not execute a tool yielded after HTTP cancellation, even if the provider ignores its signal', async () => {
+  const harness = await createTestHarness();
+  try {
+    const controller = new AbortController();
+    const upload = await harness.stage(textBytes('cancelled import'));
+    const provider: LlmProvider = { name: 'ignores-abort', defaultModel: 'test', async *stream() {
+      controller.abort();
+      yield { type: 'tool_call', call: { id: 'cancelled', name: 'import_paper', arguments: JSON.stringify({ upload_id: upload }) } };
+      yield { type: 'done', finish_reason: 'tool_calls' };
+    } };
+    const agent = new PaperAgent({ provider, conversations: harness.conversations, services: { library: harness.library, notes: harness.noteService, reading: harness.reading, reconciliation: harness.reconciliation } });
+    await expect(collect(agent.run({ prompt: 'import', signal: controller.signal }))).rejects.toMatchObject({ name: 'AbortError' });
+    expect(await harness.library.listPapers()).toEqual([]);
+    expect(await harness.uploads.get(upload as never)).not.toBeNull();
+  } finally { await harness.cleanup(); }
+});
+it('rejects overlapping runs for one Conversation and releases it after cancellation', async () => {
+  const harness = await createTestHarness();
+  try {
+    const { meta } = await harness.conversations.create();
+    const active = harness.agent.run({ prompt: 'first', conversation_id: meta.conversation_id })[Symbol.asyncIterator]();
+    expect((await active.next()).value).toMatchObject({ type: 'conversation' });
+    try {
+      const overlapping = await collect(harness.agent.run({ prompt: 'second', conversation_id: meta.conversation_id }));
+      expect(overlapping).toEqual([{ type: 'error', code: 'CONFLICT', message: 'This Conversation already has an active response.' }]);
+      expect(await harness.conversations.history(meta.conversation_id)).toEqual([]);
+    } finally { await active.return?.(); }
+    const retried = await collect(harness.agent.run({ prompt: 'retry', conversation_id: meta.conversation_id }));
+    expect(retried[0]).toMatchObject({ type: 'conversation' });
+  } finally { await harness.cleanup(); }
 });

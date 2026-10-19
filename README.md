@@ -145,7 +145,32 @@ npm test
 ```
 
 Tests use the deterministic `FakeLlmProvider` and need no network access or
-credentials.
+credentials. The primary acceptance test (`test/acceptance.test.ts`) drives the
+real HTTP/SSE server and the reconciliation command against a temporary external
+data root.
+
+### Credential-gated provider smoke test
+
+With real OpenCode Go credentials, run the smoke test that verifies streaming
+against DeepSeek V4.1 Flash and a stable Conversation session header:
+
+```sh
+OPENCODE_GO_API_KEY=... OPENCODE_GO_BASE_URL=https://opencode.ai/zen/v1 \
+  npx vitest run test/provider-smoke.test.ts
+```
+
+It is skipped automatically when `OPENCODE_GO_API_KEY` is unset.
+
+### Container acceptance
+
+With Docker running, the container acceptance flow builds and starts Compose
+against a temporary external data directory, exercises upload/SSE, asserts
+loopback-only publication and data containment, and runs reconciliation inside
+the container:
+
+```sh
+bash scripts/acceptance-docker.sh
+```
 
 ## Known v1 limitations
 
@@ -153,3 +178,23 @@ v1 is intentionally minimal. See [docs/v1-limitations.md](docs/v1-limitations.md
 for the authoritative list, including no authentication, no remote access, and
 no OCR or semantic search. Provider and infrastructure seams are described in
 [docs/dependency-substitution.md](docs/dependency-substitution.md).
+
+Revision-checked metadata edits use `catalog_revision` from `get_paper` as
+`expected_revision`; Paper Note edits use the revision from `read_note`. Missing
+or stale edit revisions are rejected. Concurrent operations within the one
+supported backend process are serialized at publication, including across store
+instances. Running multiple backend processes against one data root remains
+unsupported.
+
+Direct Node startup defaults to `127.0.0.1`; Compose explicitly binds all
+container interfaces and publishes only on host loopback. Both Docker stages
+use the exact Node `22.20.0-bookworm-slim` version tag.
+
+`scripts/acceptance-docker.sh` runs a disposable Compose project with a temporary
+external Library and an offline provider fixture. It imports a real PDF through
+HTTP/SSE and semantic tools, checks extraction and metadata, edits a note,
+verifies downloaded bytes and upload cleanup, restarts the application, and
+runs deep reconciliation. It requires Docker Compose 2.24.4 or newer, Node,
+curl, and an installed host dependency tree (`npm ci`). It never reads or
+replaces the project's credential file. Set `PAPER_HARNESS_ACCEPTANCE_PORT` to
+change its default loopback port, 18787.

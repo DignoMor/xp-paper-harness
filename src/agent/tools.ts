@@ -129,20 +129,20 @@ export function createPaperTools(): AgentTool[] {
     },
     {
       name: "get_paper",
-      description: "Get full metadata and Attachment details for one Paper.",
+      description: "Get full metadata, Attachment details, and catalog_revision for revision-checked edits.",
       parameters: objectSchema({ paper_id: { type: "string" } }, ["paper_id"]),
       handler: async (args, ctx) => ctx.library.getPaper(requireStringArg(args, "paper_id")),
     },
     {
       name: "update_paper_metadata",
-      description: "Patch editable Paper Metadata fields. Identity and storage locations are immutable.",
+      description: "Patch editable Paper Metadata fields. Requires expected_revision from get_paper. Identity and storage locations are immutable.",
       parameters: objectSchema(
         {
           paper_id: { type: "string" },
           patch: { type: "object" },
           expected_revision: { type: "number" },
         },
-        ["paper_id", "patch"],
+        ["paper_id", "patch", "expected_revision"],
       ),
       handler: async (args, ctx) =>
         ctx.library.updatePaperMetadata(
@@ -161,7 +161,7 @@ export function createPaperTools(): AgentTool[] {
           patch: { type: "object" },
           expected_revision: { type: "number" },
         },
-        ["paper_id", "attachment_id", "patch"],
+        ["paper_id", "attachment_id", "patch", "expected_revision"],
       ),
       handler: async (args, ctx) =>
         ctx.library.updateAttachmentMetadata(
@@ -180,7 +180,7 @@ export function createPaperTools(): AgentTool[] {
           attachment_id: { type: "string" },
           expected_revision: { type: "number" },
         },
-        ["paper_id", "attachment_id"],
+        ["paper_id", "attachment_id", "expected_revision"],
       ),
       handler: async (args, ctx) =>
         ctx.library.setPrimaryAttachment(
@@ -315,7 +315,6 @@ export async function executeTool(
         ok: false,
         error: new AppError("INVALID_INPUT", `Tool "${name}" received invalid JSON arguments.`, {
           tool: name,
-          detail: error instanceof Error ? error.message : String(error),
         }),
       };
     }
@@ -328,7 +327,6 @@ export async function executeTool(
       ok: false,
       error: new AppError("INTERNAL", `Tool "${name}" failed unexpectedly.`, {
         tool: name,
-        detail: error instanceof Error ? error.message : String(error),
       }),
     };
   }

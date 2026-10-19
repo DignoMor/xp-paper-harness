@@ -27,7 +27,7 @@ export function serializeNote(managed: ManagedFrontmatter, body: string): string
   };
   if (managed.doi) frontmatter.doi = managed.doi;
   const yamlText = yaml.dump(frontmatter, { lineWidth: 120, noRefs: true }).trimEnd();
-  return `---\n${yamlText}\n---\n\n${body.replace(/^\n+/, "")}`;
+  return `---\n${yamlText}\n---\n\n${body}`;
 }
 
 export function parseNote(raw: string): ParsedNote {
@@ -45,13 +45,21 @@ export function parseNote(raw: string): ParsedNote {
   } catch (error) {
     throw new AppError("CORRUPT_CATALOG", "Paper Note frontmatter is not valid YAML.", {
       reason: "invalid_yaml",
-      detail: error instanceof Error ? error.message : String(error),
     });
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     throw new AppError("CORRUPT_CATALOG", "Paper Note frontmatter must be a mapping.", {});
   }
   const record = parsed as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    if (key !== "paper_id" && key !== "title" && key !== "doi") {
+      throw new AppError(
+        "CORRUPT_CATALOG",
+        `Paper Note frontmatter contains an unsupported field "${key}".`,
+        { reason: "unknown_frontmatter_field", field: key },
+      );
+    }
+  }
   const paperId = record.paper_id;
   const title = record.title;
   if (typeof paperId !== "string" || typeof title !== "string") {

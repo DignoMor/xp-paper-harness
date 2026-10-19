@@ -111,11 +111,16 @@ describe("FakeLlmProvider", () => {
     expect(provider.turnIndex).toBe(2);
   });
 
-  it("throws when the script is exhausted", async () => {
+  it("emits a terminal PROVIDER_FAILURE error when the script is exhausted", async () => {
     const provider = new FakeLlmProvider({ script: [] });
-    await expect(collect(provider.stream(chatRequest()))).rejects.toThrow(
-      /no scripted turn/,
-    );
+    const events = await collect(provider.stream(chatRequest()));
+    expect(events).toEqual([
+      {
+        type: "error",
+        code: "PROVIDER_FAILURE",
+        message: expect.stringContaining("no scripted turn"),
+      },
+    ]);
   });
 
   it("supports a handler that inspects the latest user message", async () => {

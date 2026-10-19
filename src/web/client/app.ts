@@ -1,3 +1,4 @@
+import { sanitizeHtml } from "./sanitize-html.js";
 import { marked } from "marked";
 
 interface AppConfig {
@@ -1022,45 +1023,4 @@ function formatBytes(bytes: number): string {
 
 function truncate(value: string, max: number): string {
   return value.length > max ? `${value.slice(0, max)}…` : value;
-}
-
-const BLOCKED_TAGS = new Set([
-  "script",
-  "style",
-  "iframe",
-  "object",
-  "embed",
-  "link",
-  "meta",
-  "base",
-  "form",
-  "input",
-  "button",
-  "textarea",
-  "select",
-  "option",
-]);
-
-function sanitizeHtml(html: string): string {
-  const template = document.createElement("template");
-  template.innerHTML = html;
-  const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_ELEMENT);
-  const elements: Element[] = [];
-  while (walker.nextNode()) elements.push(walker.currentNode as Element);
-  for (const element of elements) {
-    if (BLOCKED_TAGS.has(element.tagName.toLowerCase())) {
-      element.remove();
-      continue;
-    }
-    for (const attribute of Array.from(element.attributes)) {
-      const name = attribute.name.toLowerCase();
-      const value = attribute.value.trim().toLowerCase();
-      if (name.startsWith("on")) {
-        element.removeAttribute(attribute.name);
-      } else if ((name === "href" || name === "src") && value.startsWith("javascript:")) {
-        element.removeAttribute(attribute.name);
-      }
-    }
-  }
-  return template.innerHTML;
 }

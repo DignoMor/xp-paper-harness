@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- Build stage: install every dependency and compile the application ----
-FROM node:22-bookworm-slim AS build
+FROM node:22.20.0-bookworm-slim AS build
 
 # Build tooling for any native addons. Runtime never receives these.
 RUN apt-get update \
@@ -22,7 +22,7 @@ COPY . .
 RUN npm run build
 
 # ---- Runtime stage: production dependencies and compiled output only ----
-FROM node:22-bookworm-slim AS runtime
+FROM node:22.20.0-bookworm-slim AS runtime
 
 ENV NODE_ENV=production
 WORKDIR /app

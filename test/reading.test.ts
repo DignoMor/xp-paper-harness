@@ -165,7 +165,7 @@ describe("ReadingService.readPaper", () => {
       "Supplement",
     );
 
-    await harness.library.setPrimaryAttachment(paper.paper_id, second.attachment_id);
+    await harness.library.setPrimaryAttachment(paper.paper_id, second.attachment_id, await harness.library.getCatalogRevision());
     const result = await harness.reading.readPaper({ paper_id: paper.paper_id });
 
     expect(result.attachment_id).toBe(second.attachment_id);

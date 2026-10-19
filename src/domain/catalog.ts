@@ -70,7 +70,11 @@ export function validateMetadata(value: unknown, label: string): PaperMetadata {
     }
     return out;
   });
-  const metadata: PaperMetadata = { item_type, title, creators, tags: [] };
+  const tagsRaw = requireArray(obj.tags, `${label}.tags`);
+  const tags = tagsRaw.map((tag, i) =>
+    requireString(tag, `${label}.tags[${i}]`, { max: 200 }),
+  );
+  const metadata: PaperMetadata = { item_type, title, creators, tags };
   for (const field of [
     "abstract_note",
     "publication_title",
@@ -83,11 +87,6 @@ export function validateMetadata(value: unknown, label: string): PaperMetadata {
   ] as const) {
     const raw = obj[field];
     if (raw !== undefined) metadata[field] = requireString(raw, `${label}.${field}`, { max: 20000 });
-  }
-  if (obj.tags !== undefined) {
-    metadata.tags = requireArray(obj.tags, `${label}.tags`).map((tag, i) =>
-      requireString(tag, `${label}.tags[${i}]`, { max: 200 }),
-    );
   }
   return metadata;
 }
@@ -111,13 +110,23 @@ function validateAttachment(value: unknown, label: string): AttachmentRecord {
     obj.extraction_error === null
       ? null
       : requireString(obj.extraction_error, `${label}.extraction_error`, { max: 4000 });
+  const media_type = requireString(obj.media_type, `${label}.media_type`, { max: 200 });
+  if (media_type !== "application/pdf") {
+    throw new AppError("CORRUPT_CATALOG", `${label}.media_type must be application/pdf.`, {
+      value: media_type,
+    });
+  }
+  const sha256 = requireString(obj.sha256, `${label}.sha256`, { max: 64 });
+  if (!/^[0-9a-f]{64}$/.test(sha256)) {
+    throw new AppError("CORRUPT_CATALOG", `${label}.sha256 must be a lowercase SHA-256 digest.`);
+  }
   return {
     attachment_id,
     title: requireString(obj.title, `${label}.title`, { max: 2000 }),
     description: requireString(obj.description, `${label}.description`, { max: 10000 }),
     original_filename: requireString(obj.original_filename, `${label}.original_filename`, { max: 1000 }),
-    media_type: requireString(obj.media_type, `${label}.media_type`, { max: 200 }),
-    sha256: requireString(obj.sha256, `${label}.sha256`, { max: 64 }),
+    media_type,
+    sha256,
     byte_size: requireInteger(obj.byte_size, `${label}.byte_size`),
     imported_at: requireString(obj.imported_at, `${label}.imported_at`, { max: 100 }),
     page_count,

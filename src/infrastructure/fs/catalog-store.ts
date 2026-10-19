@@ -1,3 +1,4 @@
+import { withFileLock } from "./lock.js";
 import { readFile } from "node:fs/promises";
 import { AppError } from "../../domain/errors.js";
 import {
@@ -8,9 +9,9 @@ import {
 } from "../../domain/catalog.js";
 import type { CatalogStore, DataPaths } from "../../application/ports.js";
 import { atomicWriteFile } from "./atomic.js";
+import { isNotFound } from "./errors.js";
 
 export class FileSystemCatalogStore implements CatalogStore {
-  private queue: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly paths: DataPaths) {}
 
@@ -40,15 +41,21 @@ export class FileSystemCatalogStore implements CatalogStore {
     try {
       parsed = JSON.parse(raw);
     } catch (error) {
-      throw new AppError("CORRUPT_CATALOG", "The catalog is not valid JSON.", {
-        detail: error instanceof Error ? error.message : String(error),
-      });
+      throw new AppError("CORRUPT_CATALOG", "The catalog is not valid JSON.");
     }
     return parseCatalog(parsed);
   }
 
   async save(catalog: Catalog): Promise<void> {
-    await atomicWriteFile(this.paths.catalogFile(), serializeCatalog(catalog));
+    await withFileLock(this.paths.catalogFile(), async () => {
+      const current = await this.load();
+      if (catalog.revision !== current.revision + 1) {
+        throw new AppError("STALE_REVISION", "The catalog revision is stale; reload and retry.", {
+          current_revision: current.revision, expected_revision: catalog.revision - 1,
+        });
+      }
+      await atomicWriteFile(this.paths.catalogFile(), serializeCatalog(parseCatalog(catalog)));
+    });
   }
 
   transact<T>(
@@ -62,19 +69,8 @@ export class FileSystemCatalogStore implements CatalogStore {
       }
       return result;
     };
-    const chained = this.queue.then(run, run);
-    this.queue = chained.then(
-      () => undefined,
-      () => undefined,
-    );
-    return chained;
+    return withFileLock(this.paths.catalogFile(), run);
   }
 }
 
-function isNotFound(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    (error as { code?: string }).code === "ENOENT"
-  );
-}
+

@@ -151,6 +151,22 @@ describe("ReconciliationService report-only mode", () => {
     expect(issue).toMatchObject({ severity: "error", repairable: true, paper_id: fixture.paperId });
   });
 
+  it("flags an unknown frontmatter key as repairable and leaves the file untouched", async () => {
+    const fixture = await importPaper("Extra Key Paper");
+    await writeFile(
+      harness.paths.noteFile(fixture.paperId),
+      `---\npaper_id: ${fixture.paperId}\ntitle: Extra Key Paper\nextra: nope\n---\n\n# Notes\n`,
+    );
+
+    const report = await harness.reconciliation.reconcile();
+
+    const issue = report.issues.find((candidate) => candidate.code === "NOTE_FRONTMATTER_INVALID");
+    expect(issue).toBeDefined();
+    expect(issue).toMatchObject({ severity: "error", repairable: true, paper_id: fixture.paperId });
+    expect(issue!.detail).toContain("unsupported");
+    expect(await readFile(harness.paths.noteFile(fixture.paperId), "utf8")).toContain("extra: nope");
+  });
+
   it("flags a missing Attachment file as non-repairable", async () => {
     const fixture = await importPaper();
     await rm(harness.paths.attachmentFile(fixture.paperId, fixture.attachmentId));
@@ -270,6 +286,27 @@ describe("ReconciliationService repair mode", () => {
     const parsed = parseNote(await readFile(harness.paths.noteFile(fixture.paperId), "utf8"));
     expect(parsed.managed.paper_id).toBe(fixture.paperId);
     expect(parsed.managed.title).toBe("Repaired Title");
+  });
+
+  it("repairs an unknown frontmatter key back to the canonical three keys", async () => {
+    const fixture = await importPaper("Extra Key Paper");
+    const revision = await harness.library.getCatalogRevision();
+    await harness.library.updatePaperMetadata(fixture.paperId, { doi: "10.1234/canonical" }, revision);
+    await writeFile(
+      harness.paths.noteFile(fixture.paperId),
+      `---\npaper_id: ${fixture.paperId}\ntitle: Stale Title\ndoi: 10.1234/extra\nextra: nope\n---\n\n# Notes\n`,
+    );
+
+    const report = await harness.reconciliation.reconcile({ repair: true });
+
+    expect(report.repaired.some((issue) => issue.code === "NOTE_FRONTMATTER_INVALID")).toBe(true);
+    const raw = await readFile(harness.paths.noteFile(fixture.paperId), "utf8");
+    const parsed = parseNote(raw);
+    expect(Object.keys(parsed.managed)).toEqual(["paper_id", "title", "doi"]);
+    expect(parsed.managed.paper_id).toBe(fixture.paperId);
+    expect(parsed.managed.title).toBe("Extra Key Paper");
+    expect(parsed.managed.doi).toBe("10.1234/canonical");
+    expect(raw).not.toContain("extra");
   });
 
   it("does not recreate a missing Attachment file", async () => {

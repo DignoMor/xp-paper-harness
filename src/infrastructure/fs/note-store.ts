@@ -1,9 +1,12 @@
+import { AppError } from "../../domain/errors.js";
+import { withFileLock } from "./lock.js";
 import { readFile, readdir } from "node:fs/promises";
 import { extname } from "node:path";
 import { parseNote, serializeNote, type ManagedFrontmatter, type ParsedNote } from "../../domain/note.js";
 import { isPaperId, type PaperId } from "../../domain/ids.js";
 import type { DataPaths, NoteStore } from "../../application/ports.js";
 import { atomicWriteFile, ensureDir, removeIfExists } from "./atomic.js";
+import { isNotFound } from "./errors.js";
 
 export class FileSystemNoteStore implements NoteStore {
   constructor(private readonly paths: DataPaths) {}
@@ -31,11 +34,18 @@ export class FileSystemNoteStore implements NoteStore {
     paperId: PaperId,
     managed: ManagedFrontmatter,
     body: string,
+    expectedRaw: string | null,
   ): Promise<ParsedNote> {
-    await ensureDir(this.paths.notesDir());
-    const raw = serializeNote({ ...managed, paper_id: paperId }, body);
-    await atomicWriteFile(this.paths.noteFile(paperId), raw);
-    return parseNote(raw);
+    return withFileLock(this.paths.noteFile(paperId), async () => {
+      const current = await this.readRawFile(paperId);
+      if (current !== expectedRaw) {
+        throw new AppError("STALE_REVISION", "The Paper Note changed; reread it and retry.", {});
+      }
+      await ensureDir(this.paths.notesDir());
+      const raw = serializeNote({ ...managed, paper_id: paperId }, body);
+      await atomicWriteFile(this.paths.noteFile(paperId), raw);
+      return parseNote(raw);
+    });
   }
 
   async listPaperIds(): Promise<PaperId[]> {
@@ -60,10 +70,4 @@ export class FileSystemNoteStore implements NoteStore {
   }
 }
 
-function isNotFound(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    (error as { code?: string }).code === "ENOENT"
-  );
-}
+

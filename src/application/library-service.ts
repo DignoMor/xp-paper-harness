@@ -3,9 +3,8 @@ import { basename, extname } from "node:path";
 import { AppError } from "../domain/errors.js";
 import { normalizeDoi } from "../domain/doi.js";
 import type { AttachmentId, IdGenerator, PaperId, UploadId } from "../domain/ids.js";
-import { isAttachmentId, isPaperId } from "../domain/ids.js";
+import { isAttachmentId, isPaperId, isUploadId } from "../domain/ids.js";
 import { applyAttachmentMetadataPatch, applyPaperMetadataPatch } from "../domain/metadata.js";
-import type { AttachmentMetadataPatch } from "../domain/metadata.js";
 import {
   emptyMetadata,
   paperToDetail,
@@ -18,7 +17,7 @@ import {
   type PaperSummary,
 } from "../domain/paper.js";
 import type { Catalog } from "../domain/catalog.js";
-import { CATALOG_SCHEMA_VERSION } from "../domain/catalog.js";
+import { CATALOG_SCHEMA_VERSION, validateMetadata } from "../domain/catalog.js";
 import type { ParsedNote } from "../domain/note.js";
 import type {
   CatalogStore,
@@ -27,16 +26,13 @@ import type {
   NoteStore,
   PdfExtraction,
   PdfReaderPort,
+  StagedUpload,
   UploadStore,
 } from "./ports.js";
 import { atomicWriteFile, ensureDir, removeIfExists, sha256Hex } from "../infrastructure/fs/atomic.js";
+import { isNotFound } from "../infrastructure/fs/errors.js";
 import { defaultIdGenerator } from "../domain/ids.js";
-import {
-  assertKnownKeys,
-  isPlainObject,
-  requireArray,
-  requireString,
-} from "../domain/validate.js";
+import { assertKnownKeys, isPlainObject } from "../domain/validate.js";
 import { PAPER_METADATA_FIELDS } from "../domain/paper.js";
 
 export interface ImportPaperInput {
@@ -94,7 +90,7 @@ export class LibraryService {
     const catalog = await this.deps.catalog.load();
     const paper = catalog.papers[paperId];
     if (!paper) throw new AppError("NOT_FOUND", `Paper ${paperId} was not found.`, { paper_id: paperId });
-    return paperToDetail(paper);
+    return { ...paperToDetail(paper), catalog_revision: catalog.revision };
   }
 
   async getPaperRecord(paperIdRaw: string): Promise<PaperRecord> {
@@ -131,14 +127,20 @@ export class LibraryService {
     }
   }
 
-  async importPaper(input: ImportPaperInput): Promise<ImportResult> {
-    const uploadId = this.requireUploadId(input.upload_id);
+  async requireStagedUpload(uploadIdRaw: string): Promise<StagedUpload> {
+    const uploadId = this.requireUploadId(uploadIdRaw);
     const upload = await this.deps.uploads.get(uploadId);
     if (!upload) {
-      throw new AppError("INVALID_UPLOAD", `Upload ${uploadId} was not found or has expired.`, {
+      throw new AppError("UPLOAD_EXPIRED", `Upload ${uploadId} is no longer available.`, {
         upload_id: uploadId,
       });
     }
+    return upload;
+  }
+
+  async importPaper(input: ImportPaperInput): Promise<ImportResult> {
+    const upload = await this.requireStagedUpload(input.upload_id);
+    const uploadId = upload.upload_id;
     const bytes = await this.deps.uploads.readBytes(uploadId);
     if (!bytes) {
       throw new AppError("INVALID_UPLOAD", `Upload ${uploadId} could not be read.`, {
@@ -161,39 +163,36 @@ export class LibraryService {
     }
 
     const extraction = await this.safeExtract(bytes, { maxPages: 1, maxChars: 5000 });
-    const metadata = this.buildImportMetadata(input.metadata, extraction.embedded_title, upload.original_filename);
+    const metadata = this.buildImportMetadata(input.metadata, extraction, upload.original_filename);
 
     const doi = normalizeDoi(metadata.doi);
-    if (doi) {
+    if (input.mode === "attach") {
+      if (!input.existing_paper_id) {
+        throw new AppError(
+          "INVALID_INPUT",
+          "An explicit existing_paper_id is required to attach to an existing Paper.",
+          doi ? { doi } : {},
+        );
+      }
+      return this.attachExisting(input.existing_paper_id, uploadId, bytes, sha256, extraction, {
+        title: upload.original_filename,
+      }, input.expected_revision);
+    }
+    if (input.mode !== "new" && doi) {
       const matches = findByDoi(catalog, doi);
-      const choice = input.mode;
-      if (choice !== "new") {
-        if (choice === "attach") {
-          if (!input.existing_paper_id) {
-            throw new AppError(
-              "INVALID_INPUT",
-              "An explicit existing_paper_id is required to attach to an existing Paper.",
-              { doi },
-            );
-          }
-          return this.attachExisting(input.existing_paper_id, uploadId, bytes, sha256, extraction, {
-            title: upload.original_filename,
-          }, input.expected_revision);
-        }
-        if (matches.length > 0) {
-          throw new AppError(
-            "DOI_COLLISION",
-            "A Paper with the same DOI already exists; choose new_paper or attach.",
-            {
-              doi,
-              candidates: matches.map((m) => ({
-                paper_id: m.paper_id,
-                title: m.metadata.title,
-                doi: m.metadata.doi ?? null,
-              })),
-            },
-          );
-        }
+      if (matches.length > 0) {
+        throw new AppError(
+          "DOI_COLLISION",
+          "A Paper with the same DOI already exists; choose new_paper or attach.",
+          {
+            doi,
+            candidates: matches.map((m) => ({
+              paper_id: m.paper_id,
+              title: m.metadata.title,
+              doi: m.metadata.doi ?? null,
+            })),
+          },
+        );
       }
     }
 
@@ -205,18 +204,14 @@ export class LibraryService {
       metadata,
       originalFilename: upload.original_filename,
       expectedRevision: input.expected_revision,
+      allowDoiCollision: input.mode === "new",
     });
   }
 
   async addAttachment(input: AddAttachmentInput): Promise<PaperDetail> {
     const paperId = this.requirePaperId(input.paper_id);
-    const uploadId = this.requireUploadId(input.upload_id);
-    const upload = await this.deps.uploads.get(uploadId);
-    if (!upload) {
-      throw new AppError("INVALID_UPLOAD", `Upload ${uploadId} was not found or has expired.`, {
-        upload_id: uploadId,
-      });
-    }
+    const upload = await this.requireStagedUpload(input.upload_id);
+    const uploadId = upload.upload_id;
     const bytes = await this.deps.uploads.readBytes(uploadId);
     if (!bytes) {
       throw new AppError("INVALID_UPLOAD", `Upload ${uploadId} could not be read.`, {
@@ -255,6 +250,7 @@ export class LibraryService {
     try {
       await this.deps.catalog.transact((current) => {
         this.assertRevision(current, input.expected_revision);
+        this.assertUniqueHash(current, sha256);
         const target = current.papers[paperId];
         if (!target) throw new AppError("NOT_FOUND", `Paper ${paperId} was not found.`, { paper_id: paperId });
         const updated: PaperRecord = {
@@ -287,7 +283,7 @@ export class LibraryService {
     const paperId = this.requirePaperId(paperIdRaw);
     const attachmentId = this.requireAttachmentId(attachmentIdRaw);
     await this.deps.catalog.transact((current) => {
-      this.assertRevision(current, expectedRevision);
+      this.assertRevision(current, expectedRevision, true);
       const paper = current.papers[paperId];
       if (!paper) throw new AppError("NOT_FOUND", `Paper ${paperId} was not found.`, { paper_id: paperId });
       if (!paper.attachments[attachmentId]) {
@@ -319,8 +315,9 @@ export class LibraryService {
     expectedRevision?: number,
   ): Promise<PaperDetail> {
     const paperId = this.requirePaperId(paperIdRaw);
+    applyPaperMetadataPatch((await this.getPaperRecord(paperId)).metadata, patch);
     const updated = await this.deps.catalog.transact((current) => {
-      this.assertRevision(current, expectedRevision);
+      this.assertRevision(current, expectedRevision, true);
       const paper = current.papers[paperId];
       if (!paper) throw new AppError("NOT_FOUND", `Paper ${paperId} was not found.`, { paper_id: paperId });
       const metadata = applyPaperMetadataPatch(paper.metadata, patch);
@@ -350,8 +347,11 @@ export class LibraryService {
   ): Promise<PaperDetail> {
     const paperId = this.requirePaperId(paperIdRaw);
     const attachmentId = this.requireAttachmentId(attachmentIdRaw);
+    const record = await this.getPaperRecord(paperId);
+    const existing = record.attachments[attachmentId];
+    if (existing) applyAttachmentMetadataPatch(existing, patch);
     await this.deps.catalog.transact((current) => {
-      this.assertRevision(current, expectedRevision);
+      this.assertRevision(current, expectedRevision, true);
       const paper = current.papers[paperId];
       if (!paper) throw new AppError("NOT_FOUND", `Paper ${paperId} was not found.`, { paper_id: paperId });
       const attachment = paper.attachments[attachmentId];
@@ -412,6 +412,7 @@ export class LibraryService {
     extraction: PdfExtraction;
     metadata: PaperMetadata;
     originalFilename: string;
+    allowDoiCollision: boolean;
     expectedRevision?: number;
   }): Promise<ImportResult> {
     const paperId = this.ids.paperId();
@@ -445,9 +446,15 @@ export class LibraryService {
         paperId,
         { paper_id: paperId, title: record.metadata.title, doi: record.metadata.doi },
         "# Notes\n",
+        null,
       );
       await this.deps.catalog.transact((current) => {
         this.assertRevision(current, input.expectedRevision);
+        this.assertUniqueHash(current, input.sha256);
+        const doi = normalizeDoi(input.metadata.doi);
+        if (!input.allowDoiCollision && doi && findByDoi(current, doi).length) {
+          throw new AppError("DOI_COLLISION", "A matching DOI requires an explicit new or attach choice.", { doi });
+        }
         return {
           catalog: {
             schema_version: CATALOG_SCHEMA_VERSION,
@@ -463,7 +470,7 @@ export class LibraryService {
       throw error;
     }
     await this.deps.uploads.remove(input.uploadId);
-    const detail = paperToDetail(record);
+    const detail = await this.getPaper(paperId);
     return { paper: detail, note, imported_as: "new_paper" };
   }
 
@@ -475,28 +482,29 @@ export class LibraryService {
       title: paper.metadata.title,
       doi: paper.metadata.doi,
     };
-    await this.deps.notes.write(paper.paper_id, managed, note.body);
+    await this.deps.notes.write(paper.paper_id, managed, note.body, note.raw);
   }
 
   private buildImportMetadata(
     input: Record<string, unknown> | undefined,
-    embeddedTitle: string | null,
+    extraction: PdfExtraction,
     originalFilename: string,
   ): PaperMetadata {
     const fallback = titleFromFilename(originalFilename);
     const metadata = emptyMetadata(fallback);
-    const providedTitle =
-      input && typeof input.title === "string" ? input.title : undefined;
-    if (input !== undefined) {
-      this.applyMetadataInput(metadata, input);
+    if (input !== undefined) this.applyMetadataInput(metadata, input);
+    const extracted = { title: extraction.embedded_title, ...extraction.metadata };
+    const draft = { ...metadata } as Record<string, unknown>;
+    for (const field of PAPER_METADATA_FIELDS) {
+      const supplied = input?.[field];
+      const empty = supplied === undefined || supplied === null ||
+        (typeof supplied === "string" && supplied.trim() === "") ||
+        (Array.isArray(supplied) && supplied.length === 0);
+      const value = extracted[field as keyof typeof extracted];
+      if (empty && value !== undefined && value !== null && value !== "") draft[field] = typeof value === "string" ? value.trim() : value;
     }
-    if (providedTitle !== undefined) {
-      metadata.title = providedTitle;
-    } else if (embeddedTitle && embeddedTitle.trim() !== "") {
-      metadata.title = embeddedTitle.trim();
-    }
-    if (metadata.title.trim() === "") metadata.title = embeddedTitle?.trim() || fallback;
-    return metadata;
+    if (typeof draft.title !== "string" || draft.title.trim() === "") draft.title = fallback;
+    return validateMetadata(draft, "metadata");
   }
 
   private applyMetadataInput(metadata: PaperMetadata, input: Record<string, unknown>): void {
@@ -504,32 +512,13 @@ export class LibraryService {
       throw new AppError("INVALID_INPUT", "metadata must be an object.", { field: "metadata" });
     }
     assertKnownKeys(input, PAPER_METADATA_FIELDS, "metadata");
-    const base = JSON.parse(JSON.stringify(metadata)) as PaperMetadata;
-    const draft: Record<string, unknown> = { ...base };
+    const draft: Record<string, unknown> = JSON.parse(JSON.stringify(metadata)) as Record<string, unknown>;
     for (const [key, value] of Object.entries(input)) {
       if (value === undefined) continue;
       draft[key] = value;
     }
-    const candidate: PaperMetadata = {
-      item_type: requireString(draft.item_type, "metadata.item_type", { max: 100 }),
-      title: requireString(draft.title, "metadata.title", { max: 2000 }),
-      creators: requireArray(draft.creators, "metadata.creators") as PaperMetadata["creators"],
-      tags: requireArray(draft.tags ?? [], "metadata.tags") as string[],
-    };
-    for (const field of [
-      "abstract_note",
-      "publication_title",
-      "volume",
-      "issue",
-      "pages",
-      "date",
-      "doi",
-      "url",
-    ] as const) {
-      const value = draft[field];
-      if (typeof value === "string") candidate[field] = value;
-    }
-    Object.assign(metadata, candidate);
+    const validated = validateMetadata(draft, "metadata");
+    Object.assign(metadata, validated);
   }
 
   private buildAttachmentRecord(input: {
@@ -571,13 +560,21 @@ export class LibraryService {
         embedded_title: null,
         truncated: { bytes: false, pages: false, chars: false },
         continuation: null,
-        error: error instanceof Error ? error.message : String(error),
+        error: "PDF extraction could not be completed.",
       };
     }
   }
 
-  private assertRevision(catalog: Catalog, expected?: number): void {
-    if (expected === undefined) return;
+  private assertUniqueHash(catalog: Catalog, hash: string): void {
+    const duplicate = findDuplicateHash(catalog, hash);
+    if (duplicate) throw new AppError("DUPLICATE_HASH", "An identical Attachment already exists.", duplicate);
+  }
+
+  private assertRevision(catalog: Catalog, expected?: number, required = false): void {
+    if (expected === undefined && !required) return;
+    if (!Number.isSafeInteger(expected) || expected! < 0) {
+      throw new AppError("INVALID_INPUT", "A non-negative integer expected_revision is required.", { field: "expected_revision" });
+    }
     if (catalog.revision !== expected) {
       throw new AppError("STALE_REVISION", "The catalog revision is stale; reload and retry.", {
         expected_revision: expected,
@@ -603,12 +600,12 @@ export class LibraryService {
   }
 
   private requireUploadId(value: string): UploadId {
-    if (typeof value !== "string" || !value.startsWith("upl_")) {
-      throw new AppError("INVALID_UPLOAD", `"${value}" is not a valid upload ID.`, {
+    if (!isUploadId(value)) {
+      throw new AppError("INVALID_ID", `"${value}" is not a valid Upload ID.`, {
         upload_id: value,
       });
     }
-    return value as UploadId;
+    return value;
   }
 }
 
@@ -655,10 +652,4 @@ function mapExtractionStatus(status: PdfExtraction["status"]): ExtractionStatus 
   }
 }
 
-function isNotFound(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    (error as { code?: string }).code === "ENOENT"
-  );
-}
+

@@ -35,7 +35,7 @@ export function requireString(value: unknown, label: string, opts: { max?: numbe
 }
 
 export function requireInteger(value: unknown, label: string): number {
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
     throw invalidInput(`${label} must be a non-negative integer.`, { field: label });
   }
   return value;

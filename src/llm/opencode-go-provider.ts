@@ -80,7 +80,6 @@ export class OpenCodeGoProvider implements LlmProvider {
         code: "PROVIDER_FAILURE",
         message: CREDENTIALS_MISSING_MESSAGE,
       };
-      yield { type: "done", finish_reason: "error" };
       return;
     }
 
@@ -116,7 +115,6 @@ export class OpenCodeGoProvider implements LlmProvider {
         code: "PROVIDER_FAILURE",
         message: "Unable to reach the OpenCode Go service.",
       };
-      yield { type: "done", finish_reason: "error" };
       return;
     }
 
@@ -126,7 +124,6 @@ export class OpenCodeGoProvider implements LlmProvider {
         code: "PROVIDER_FAILURE",
         message: `OpenCode Go request failed (HTTP ${response.status}).`,
       };
-      yield { type: "done", finish_reason: "error" };
       return;
     }
 
@@ -137,7 +134,6 @@ export class OpenCodeGoProvider implements LlmProvider {
         code: "PROVIDER_FAILURE",
         message: "OpenCode Go returned an empty response body.",
       };
-      yield { type: "done", finish_reason: "error" };
       return;
     }
 
@@ -182,7 +178,12 @@ export class OpenCodeGoProvider implements LlmProvider {
           newline = buffer.indexOf("\n");
         }
       }
+    } catch (error) {
+      if (isAbortError(error) || request.signal?.aborted) throw abortError();
+      yield { type: "error", code: "PROVIDER_FAILURE", message: "The OpenCode Go response stream failed." };
+      return;
     } finally {
+      await reader.cancel().catch(() => {});
       reader.releaseLock();
     }
 
@@ -202,6 +203,10 @@ export class OpenCodeGoProvider implements LlmProvider {
       }
     }
 
+    if (!sawDone && finishReason === undefined) {
+      yield { type: "error", code: "PROVIDER_FAILURE", message: "The OpenCode Go response ended before completion." };
+      return;
+    }
     for (const call of drainPending(pending)) {
       yield { type: "tool_call", call };
     }
@@ -247,9 +252,6 @@ function applyChunk(
   if (Array.isArray(delta.tool_calls)) {
     for (const fragment of delta.tool_calls) {
       const index = typeof fragment.index === "number" ? fragment.index : 0;
-      if (!pending.has(index) && pending.size > 0) {
-        completed.push(...drainPending(pending));
-      }
       let acc = pending.get(index);
       if (!acc) {
         acc = { id: "", name: "", args: "" };

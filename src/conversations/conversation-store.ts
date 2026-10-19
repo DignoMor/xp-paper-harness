@@ -3,6 +3,8 @@ import type { Clock, DataPaths } from "../application/ports.js";
 import { AppError } from "../domain/errors.js";
 import { uuidv7 } from "../domain/ids.js";
 import { atomicWriteFile, ensureDir } from "../infrastructure/fs/atomic.js";
+import { withFileLock } from "../infrastructure/fs/lock.js";
+import { isNotFound } from "../infrastructure/fs/errors.js";
 
 export type ConversationId = string & { readonly __brand: "ConversationId" };
 
@@ -65,7 +67,6 @@ export class ConversationStore {
   private readonly paths: DataPaths;
   private readonly clock: Clock;
   private readonly ids: ConversationIdGenerator;
-  private queue: Promise<unknown> = Promise.resolve();
 
   constructor(options: ConversationStoreOptions) {
     this.paths = options.paths;
@@ -84,6 +85,7 @@ export class ConversationStore {
       created_at: timestamp,
       updated_at: timestamp,
     };
+    requireConversationId(meta.conversation_id);
     const conversation: Conversation = { meta, messages: [] };
     return this.enqueue(async () => {
       await ensureDir(this.paths.sessionsDir());
@@ -107,6 +109,7 @@ export class ConversationStore {
     for (const entry of entries) {
       if (!entry.endsWith(SESSION_EXTENSION)) continue;
       const id = entry.slice(0, -SESSION_EXTENSION.length);
+      if (!isConversationId(id)) continue;
       const conversation = await this.readConversation(id);
       if (conversation === null) continue;
       summaries.push({
@@ -156,6 +159,7 @@ export class ConversationStore {
         updated_at: this.clock.isoNow(),
       };
       await ensureDir(this.paths.sessionsDir());
+      await this.recoverAppendTail(id);
       await appendFile(
         this.paths.sessionFile(id),
         serializeMeta(meta),
@@ -190,6 +194,7 @@ export class ConversationStore {
             : this.clock.isoNow(),
       };
       await ensureDir(this.paths.sessionsDir());
+      await this.recoverAppendTail(id);
       await appendFile(
         this.paths.sessionFile(id),
         serializeMessage(normalized),
@@ -208,21 +213,33 @@ export class ConversationStore {
     const collapsed = firstLine.trim().replace(/\s+/g, " ");
     if (collapsed === "") return DEFAULT_CONVERSATION_TITLE;
     if (collapsed.length > MAX_TITLE_LENGTH) {
-      return `${collapsed.slice(0, MAX_TITLE_LENGTH)}…`;
+      return `${collapsed.slice(0, MAX_TITLE_LENGTH - 1)}…`;
     }
     return collapsed;
   }
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
-    const run = this.queue.then(operation, operation);
-    this.queue = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    return run;
+    return withFileLock(this.paths.sessionsDir(), operation);
+  }
+
+  private async recoverAppendTail(id: string): Promise<void> {
+    const file = this.paths.sessionFile(id);
+    const raw = await readFile(file, "utf8");
+    if (raw.endsWith("\n")) return;
+    const boundary = raw.lastIndexOf("\n") + 1;
+    const tail = raw.slice(boundary);
+    let recovered = raw.slice(0, boundary);
+    try {
+      JSON.parse(tail);
+      recovered = `${raw}\n`;
+    } catch {
+      // Discard only the incomplete final record; preserve every committed line.
+    }
+    await atomicWriteFile(file, recovered);
   }
 
   private async readConversation(id: string): Promise<Conversation | null> {
+    requireConversationId(id);
     let raw: string;
     try {
       raw = await readFile(this.paths.sessionFile(id), "utf8");
@@ -257,7 +274,6 @@ export class ConversationStore {
           {
             conversation_id: id,
             line: i + 1,
-            detail: error instanceof Error ? error.message : String(error),
           },
         );
       }
@@ -344,10 +360,13 @@ function isRole(value: unknown): value is ConversationMessage["role"] {
   );
 }
 
-function isNotFound(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    (error as { code?: string }).code === "ENOENT"
-  );
+
+function isConversationId(id: string): boolean {
+  return /^cnv_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id);
+}
+
+function requireConversationId(id: string): void {
+  if (!isConversationId(id)) {
+    throw new AppError("INVALID_ID", "A valid Conversation ID is required.");
+  }
 }

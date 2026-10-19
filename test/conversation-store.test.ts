@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -110,8 +110,8 @@ describe("ConversationStore", () => {
     it("truncates long prompts to 60 characters with an ellipsis", () => {
       const prompt = "a".repeat(100);
       const title = store.defaultTitleFromPrompt(prompt);
-      expect(title).toBe(`${"a".repeat(60)}…`);
-      expect(title.length).toBe(61);
+      expect(title).toBe(`${"a".repeat(59)}…`);
+      expect(title.length).toBe(60);
     });
 
     it("falls back when there is no usable text", () => {
@@ -180,10 +180,10 @@ describe("ConversationStore", () => {
 
   it("throws NOT_FOUND for a missing conversation", async () => {
     const store = newStore();
-    await expect(store.get("cnv_missing")).rejects.toMatchObject({
+    await expect(store.get("cnv_00000000-0000-7000-8000-000000000000")).rejects.toMatchObject({
       code: "NOT_FOUND",
     });
-    await expect(store.history("cnv_missing")).rejects.toMatchObject({
+    await expect(store.history("cnv_00000000-0000-7000-8000-000000000000")).rejects.toMatchObject({
       code: "NOT_FOUND",
     });
   });
@@ -206,6 +206,34 @@ describe("ConversationStore", () => {
         created_at: systemClock.isoNow(),
       }),
     ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+  });
+
+  it("rejects unsafe conversation IDs before reading or writing paths", async () => {
+    const store = newStore();
+    for (const id of ["../outside", "cnv_missing", "/tmp/outside", "cnv_../outside"]) {
+      await expect(store.get(id)).rejects.toMatchObject({ code: "INVALID_ID" });
+      await expect(store.rename(id, "changed")).rejects.toMatchObject({ code: "INVALID_ID" });
+      await expect(store.appendMessage(id, message("user", "x", systemClock.isoNow())))
+        .rejects.toMatchObject({ code: "INVALID_ID" });
+    }
+  });
+
+  it.each(["append", "rename"])("recovers a partial crash tail before %s without losing history", async (operation) => {
+    const store = newStore();
+    const { meta } = await store.create("Research");
+    const id = meta.conversation_id;
+    await store.appendMessage(id, message("user", "before crash", systemClock.isoNow()));
+    await appendFile(new FileSystemDataPaths(dir).sessionFile(id), '{"type":"message","content":"unfinished');
+    const restarted = newStore();
+    expect(await restarted.history(id)).toHaveLength(1);
+    if (operation === "rename") await restarted.rename(id, "Recovered");
+    else await restarted.appendMessage(id, message("assistant", "after crash", systemClock.isoNow()));
+    await restarted.appendMessage(id, message("user", "continued", systemClock.isoNow()));
+    const loaded = await newStore().get(id);
+    expect(loaded.messages.map(entry => entry.content)).toEqual(
+      operation === "rename" ? ["before crash", "continued"] : ["before crash", "after crash", "continued"],
+    );
+    if (operation === "rename") expect(loaded.meta.title).toBe("Recovered");
   });
 
   it("serializes concurrent appends without corruption", async () => {

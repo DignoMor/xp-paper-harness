@@ -1,7 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { AppError, isAppError } from "../domain/errors.js";
-import { parseCatalog, type Catalog } from "../domain/catalog.js";
+import { emptyCatalog, parseCatalog, type Catalog } from "../domain/catalog.js";
 import { isAttachmentId, isPaperId } from "../domain/ids.js";
 import { parseNote } from "../domain/note.js";
 import type { AttachmentRecord, PaperRecord } from "../domain/paper.js";
@@ -64,6 +64,7 @@ export class ReconciliationService {
         message: "No catalog exists yet; the Library is empty.",
         repairable: false,
       });
+      await this.checkOrphans(emptyCatalog(), issues);
       return this.finish({ issues, repaired, repair, deep, revision: null });
     }
 
@@ -115,9 +116,14 @@ export class ReconciliationService {
       paperId as never,
       attachment.attachment_id,
     );
+    if (attachment.storage_path !== `papers/${paperId}/attachments/${attachment.attachment_id}.pdf`) {
+      ctx.issues.push({ severity: "error", code: "ATTACHMENT_PATH_MISMATCH",
+        message: "Stored Attachment location differs from its ID-derived location.",
+        paper_id: paperId, attachment_id: attachment.attachment_id, repairable: false });
+    }
     let exists = true;
     try {
-      await stat(filePath);
+      exists = (await stat(filePath)).isFile();
     } catch {
       exists = false;
     }
@@ -155,7 +161,7 @@ export class ReconciliationService {
           paper_id: paperId,
           attachment_id: attachment.attachment_id,
           repairable: false,
-          detail: error instanceof Error ? error.message : String(error),
+          detail: "Attachment bytes could not be read.",
         });
       }
     }
@@ -186,7 +192,7 @@ export class ReconciliationService {
       };
       ctx.issues.push(issue);
       if (ctx.repair) {
-        await this.deps.notes.write(paperId, managed, "# Notes\n");
+        await this.deps.notes.write(paperId, managed, "# Notes\n", null);
         ctx.repaired.push(issue);
       }
       return;
@@ -224,65 +230,56 @@ export class ReconciliationService {
         try {
           body = parseNote(existingRaw).body;
         } catch {
-          body = "# Notes\n";
+          // A closed frontmatter block has an unambiguous body even if YAML
+          // is invalid. Without a closing delimiter preserve the entire file.
+          const block = /^---\r?\n[\s\S]*?\r?\n---[ \t]*\r?\n(?:\r?\n)?/.exec(existingRaw);
+          body = block ? existingRaw.slice(block[0].length) : existingRaw;
         }
-        await this.deps.notes.write(paperId, managed, body);
+        await this.deps.notes.write(paperId, managed, body, existingRaw);
         ctx.repaired.push(stale);
       }
     }
   }
 
   private async checkOrphans(catalog: Catalog, issues: ReconciliationIssue[]): Promise<void> {
-    const knownNoted = new Set(Object.keys(catalog.papers));
-    for (const noteId of await this.deps.notes.listPaperIds()) {
-      if (!knownNoted.has(noteId)) {
-        issues.push({
-          severity: "warning",
-          code: "ORPHAN_NOTE",
-          message: `Paper Note ${noteId} has no matching Paper.`,
-          paper_id: noteId,
-          repairable: false,
-        });
+    const known = new Set<string>();
+    for (const paper of Object.values(catalog.papers)) {
+      known.add(this.deps.paths.noteFile(paper.paper_id));
+      for (const attachment of Object.values(paper.attachments)) {
+        known.add(this.deps.paths.attachmentFile(paper.paper_id, attachment.attachment_id));
       }
     }
-    let paperDirs: string[];
-    try {
-      paperDirs = await readdir(this.deps.paths.papersDir());
-    } catch {
-      return;
-    }
-    for (const dir of paperDirs) {
-      if (!isPaperId(dir)) continue;
-      const paper = catalog.papers[dir];
-      const attachmentsDir = join(this.deps.paths.papersDir(), dir, "attachments");
-      let files: string[];
-      try {
-        files = await readdir(attachmentsDir);
-      } catch {
-        continue;
+    const walk = async (dir: string, kind: "note" | "pdf"): Promise<void> => {
+      let entries;
+      try { entries = await readdir(dir, { withFileTypes: true }); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+        throw error;
       }
-      for (const file of files) {
-        if (!file.endsWith(".pdf")) continue;
-        const attachmentId = file.slice(0, -4);
-        if (!paper || !isAttachmentId(attachmentId) || !paper.attachments[attachmentId]) {
-          issues.push({
-            severity: "warning",
-            code: "ORPHAN_PDF",
-            message: `PDF ${dir}/${file} is not referenced by the catalog.`,
-            paper_id: dir,
-            attachment_id: isAttachmentId(attachmentId) ? attachmentId : undefined,
-            repairable: false,
-          });
-        }
+      for (const entry of entries) {
+        const path = join(dir, entry.name);
+        if (entry.isDirectory()) { await walk(path, kind); continue; }
+        if (!entry.name.toLowerCase().endsWith(kind === "note" ? ".md" : ".pdf") || known.has(path)) continue;
+        const paperCandidate = kind === "note" ? entry.name.slice(0, -3) : dir.split(/[\\/]/).at(-2);
+        const attachmentCandidate = entry.name.slice(0, -4);
+        issues.push({ severity: "warning", code: kind === "note" ? "ORPHAN_NOTE" : "ORPHAN_PDF",
+          message: `An unreferenced ${kind === "note" ? "Paper Note" : "PDF"} was found.`,
+          detail: relative(this.deps.paths.root, path),
+          paper_id: isPaperId(paperCandidate) ? paperCandidate : undefined,
+          attachment_id: kind === "pdf" && isAttachmentId(attachmentCandidate) ? attachmentCandidate : undefined,
+          repairable: false });
       }
-    }
+    };
+    await walk(this.deps.paths.notesDir(), "note");
+    await walk(this.deps.paths.papersDir(), "pdf");
   }
 
   private async readNoteRaw(paperId: string): Promise<string | null> {
     try {
       return await readFile(this.deps.paths.noteFile(paperId as never), "utf8");
-    } catch {
-      return null;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
     }
   }
 

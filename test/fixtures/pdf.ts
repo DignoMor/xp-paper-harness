@@ -50,7 +50,7 @@ function drawingContentStream(): string {
   return "0.2 0.4 0.8 rg\n72 72 200 300 re f\n";
 }
 
-export function buildTextPdf(pageTexts: readonly string[] = FIXTURE_PAGE_TEXTS): Uint8Array {
+export function buildTextPdf(pageTexts: readonly string[] = FIXTURE_PAGE_TEXTS, info: Record<string, string> = {}): Uint8Array {
   const objects: PdfObject[] = [];
   const firstPageObject = 3;
   const firstContentObject = 4;
@@ -86,7 +86,7 @@ export function buildTextPdf(pageTexts: readonly string[] = FIXTURE_PAGE_TEXTS):
   });
   objects.push({
     number: infoObject,
-    body: `<< /Title (${FIXTURE_TITLE}) /Author (Paper Harness Fixture) >>`,
+    body: `<< ${Object.entries({ Title: FIXTURE_TITLE, Author: "Paper Harness Fixture", ...info }).map(([key, value]) => `/${key} (${value.replace(/[\\()]/g, "\\$&")})`).join(" ")} >>`,
   });
 
   return assemble(

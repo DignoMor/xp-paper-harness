@@ -1,4 +1,4 @@
-import { ensureDir } from "./infrastructure/fs/atomic.js";
+import { cleanupAtomicTemps, ensureDir } from "./infrastructure/fs/atomic.js";
 import { compose } from "./composition.js";
 import { loadConfig } from "./config.js";
 import { createWebServer } from "./web/server.js";
@@ -18,6 +18,7 @@ export async function startApplication(env: NodeJS.ProcessEnv = process.env): Pr
   ]) {
     await ensureDir(dir);
   }
+  await cleanupAtomicTemps(paths.root);
   const purged = await uploads.purgeExpired(config.upload.ttlMs);
   if (purged > 0) {
     process.stdout.write(`Purged ${purged} expired upload(s).\n`);
@@ -38,7 +39,6 @@ export async function startApplication(env: NodeJS.ProcessEnv = process.env): Pr
   process.stdout.write(
     [
       `Paper Harness listening on http://127.0.0.1:${port}`,
-      `Data root: ${config.dataRoot}`,
       `LLM provider: ${llm.name} (model ${llm.defaultModel})`,
       "Relevant Paper content and Paper Notes may be sent to the configured LLM provider.",
       "Loopback access only; do not expose this unauthenticated service remotely.",
@@ -62,7 +62,7 @@ const isEntrypoint =
 
 if (isEntrypoint) {
   startApplication().catch((error) => {
-    process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
+    process.stderr.write("Paper Harness could not start; check configuration, data access, and port availability.\n");
     process.exit(1);
   });
 }

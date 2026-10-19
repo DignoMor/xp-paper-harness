@@ -1,4 +1,5 @@
 import { AppError } from "./errors.js";
+import { validateMetadata } from "./catalog.js";
 import {
   ATTACHMENT_MUTABLE_FIELDS,
   PAPER_METADATA_FIELDS,
@@ -59,7 +60,7 @@ export function applyPaperMetadataPatch(
       throw new AppError("INVALID_INPUT", `${field} must be a string.`, { field });
     }
   }
-  return draft as unknown as PaperMetadata;
+  return validateMetadata(draft, "paper metadata patch");
 }
 
 export interface AttachmentMetadataPatch {
