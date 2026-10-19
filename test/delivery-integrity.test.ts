@@ -102,3 +102,13 @@ it.each(['{ broken', '{"schema_version":999,"revision":1,"papers":{}}', '{"schem
   await expect(h.catalog.save({ schema_version: 1, revision: 2, papers: {} })).rejects.toBeInstanceOf(Error);
   expect(await readFile(h.paths.catalogFile(), 'utf8')).toBe(raw);
 });
+it.each([{ sha256: 'x' }, { sha256: 'A'.repeat(64) }, { byte_size: Number.MAX_SAFE_INTEGER + 1 }])('refuses malformed Attachment integrity fields without rewriting evidence: %j', async patch => {
+  const p = await paper();
+  const catalog = await h.catalog.load();
+  Object.assign(catalog.papers[p.paper_id]!.attachments[p.primary_attachment_id]!, patch);
+  const raw = JSON.stringify(catalog);
+  await writeFile(h.paths.catalogFile(), raw);
+  await expect(h.catalog.load()).rejects.toBeInstanceOf(Error);
+  expect(await readFile(h.paths.catalogFile(), 'utf8')).toBe(raw);
+  expect((await h.reconciliation.reconcile()).issues).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'CATALOG_CORRUPT' })]));
+});

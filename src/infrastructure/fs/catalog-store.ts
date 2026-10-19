@@ -41,9 +41,7 @@ export class FileSystemCatalogStore implements CatalogStore {
     try {
       parsed = JSON.parse(raw);
     } catch (error) {
-      throw new AppError("CORRUPT_CATALOG", "The catalog is not valid JSON.", {
-        detail: error instanceof Error ? error.message : String(error),
-      });
+      throw new AppError("CORRUPT_CATALOG", "The catalog is not valid JSON.");
     }
     return parseCatalog(parsed);
   }

@@ -53,3 +53,11 @@ it('cleans staged partials when an HTTP request stream fails', async () => {
   await vi.waitFor(async () => expect(await readdir(h.paths.uploadsDir())).toEqual([]));
   res.destroy();
 });
+it('does not expose unexpected filesystem errors in HTTP responses', async () => {
+  vi.spyOn(h.conversations, 'create').mockRejectedValueOnce(new Error('EACCES /private/secret-library api-key-value'));
+  const { req, res, chunks } = exchange('/api/conversations', { 'content-type': 'application/json' });
+  req.end('{}');
+  await vi.waitFor(() => expect(res.writableEnded).toBe(true));
+  expect(res.statusCode).toBe(500);
+  expect(JSON.parse(chunks.join(''))).toEqual({ error: { code: 'INTERNAL', message: 'An unexpected error occurred.', details: {} } });
+});

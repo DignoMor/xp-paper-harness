@@ -34,6 +34,7 @@ export interface RunAgentInput {
 
 export class PaperAgent {
   readonly tools: AgentTool[];
+  private readonly activeConversations = new Set<string>();
   private readonly model: string;
   private readonly maxToolIterations: number;
 
@@ -61,125 +62,135 @@ export class PaperAgent {
       conversation = created.meta;
     }
 
-    if (conversation.title === DEFAULT_CONVERSATION_TITLE) {
-      const prior = await this.deps.conversations.history(conversation.conversation_id);
-      const isFirstUserMessage = !prior.some((message) => message.role === "user");
-      if (isFirstUserMessage) {
-        conversation = await this.deps.conversations.rename(
-          conversation.conversation_id,
-          this.deps.conversations.defaultTitleFromPrompt(input.prompt),
-        );
-      }
+    const id = conversation.conversation_id;
+    if (this.activeConversations.has(id)) {
+      yield { type: "error", code: "CONFLICT", message: "This Conversation already has an active response." };
+      return;
     }
-
-    yield { type: "conversation", conversation };
-
-    await this.deps.conversations.appendMessage(conversation.conversation_id, {
-      role: "user",
-      content: input.prompt,
-      created_at: new Date().toISOString(),
-    });
-
-    const history = await this.deps.conversations.history(conversation.conversation_id);
-    const messages: LlmMessage[] = [
-      { role: "system", content: buildSystemPrompt(this.deps.systemPromptExtra) },
-      ...history.map(toLlmMessage),
-    ];
-    const toolSpecs = this.tools.map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      parameters: tool.parameters,
-    }));
-
-    let iterations = 0;
-    while (true) {
-      throwIfAborted(input.signal);
-      if (iterations >= this.maxToolIterations) {
-        yield {
-          type: "error",
-          code: "TOOL_LOOP_LIMIT",
-          message: "The agent reached the tool iteration limit.",
-        };
-        break;
-      }
-      iterations += 1;
-
-      let assistantText = "";
-      const toolCalls: LlmToolCall[] = [];
-      let finishReason = "stop";
-      let providerFailed = false;
-
-      for await (const event of this.deps.provider.stream({
-        model: this.model,
-        session_id: conversation.conversation_id,
-        messages,
-        tools: toolSpecs,
-        signal: input.signal,
-      })) {
-        throwIfAborted(input.signal);
-        if (event.type === "text") {
-          assistantText += event.delta;
-          yield { type: "text", delta: event.delta };
-        } else if (event.type === "tool_call") {
-          toolCalls.push(event.call);
-          yield { type: "tool_call", name: event.call.name, arguments: event.call.arguments };
-        } else if (event.type === "error") {
-          providerFailed = true;
-          yield { type: "error", code: event.code, message: event.message };
-        } else if (event.type === "done") {
-          finishReason = event.finish_reason;
+    this.activeConversations.add(id);
+    try {
+      if (conversation.title === DEFAULT_CONVERSATION_TITLE) {
+        const prior = await this.deps.conversations.history(conversation.conversation_id);
+        const isFirstUserMessage = !prior.some((message) => message.role === "user");
+        if (isFirstUserMessage) {
+          conversation = await this.deps.conversations.rename(
+            conversation.conversation_id,
+            this.deps.conversations.defaultTitleFromPrompt(input.prompt),
+          );
         }
       }
 
-      if (providerFailed) {
-        await this.appendAssistant(conversation.conversation_id, assistantText, toolCalls);
-        return;
-      }
+      yield { type: "conversation", conversation };
 
-      await this.appendAssistant(conversation.conversation_id, assistantText, toolCalls);
-      if (assistantText !== "" || toolCalls.length > 0) {
-        messages.push({
-          role: "assistant",
-          content: assistantText,
-          ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
-        });
-      }
+      await this.deps.conversations.appendMessage(conversation.conversation_id, {
+        role: "user",
+        content: input.prompt,
+        created_at: new Date().toISOString(),
+      });
 
-      if (toolCalls.length === 0) {
-        void finishReason;
-        break;
-      }
+      const history = await this.deps.conversations.history(conversation.conversation_id);
+      const messages: LlmMessage[] = [
+        { role: "system", content: buildSystemPrompt(this.deps.systemPromptExtra) },
+        ...history.map(toLlmMessage),
+      ];
+      const toolSpecs = this.tools.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters,
+      }));
 
-      for (const call of toolCalls) {
+      let iterations = 0;
+      while (true) {
         throwIfAborted(input.signal);
-        const outcome = await executeTool(
-          this.tools,
-          call.name,
-          call.arguments,
-          this.deps.services,
-        );
-        const content = outcome.ok
-          ? JSON.stringify(outcome.result)
-          : `Error: ${JSON.stringify(outcome.error.toJSON())}`;
-        yield {
-          type: "tool_result",
-          name: call.name,
-          ok: outcome.ok,
-          result: outcome.ok ? outcome.result : outcome.error.toJSON(),
-        };
-        const toolMessage: ConversationMessage = {
-          role: "tool",
-          content,
-          created_at: new Date().toISOString(),
-          tool_call_id: call.id,
-          name: call.name,
-        };
-        await this.deps.conversations.appendMessage(conversation.conversation_id, toolMessage);
-        messages.push(toLlmMessage(toolMessage));
-      }
-    }
+        if (iterations >= this.maxToolIterations) {
+          yield {
+            type: "error",
+            code: "TOOL_LOOP_LIMIT",
+            message: "The agent reached the tool iteration limit.",
+          };
+          return;
+        }
+        iterations += 1;
 
-    yield { type: "done", conversation_id: conversation.conversation_id, title: conversation.title };
+        let assistantText = "";
+        const toolCalls: LlmToolCall[] = [];
+        let finishReason = "stop";
+        let providerFailed = false;
+
+        for await (const event of this.deps.provider.stream({
+          model: this.model,
+          session_id: conversation.conversation_id,
+          messages,
+          tools: toolSpecs,
+          signal: input.signal,
+        })) {
+          throwIfAborted(input.signal);
+          if (event.type === "text") {
+            assistantText += event.delta;
+            yield { type: "text", delta: event.delta };
+          } else if (event.type === "tool_call") {
+            toolCalls.push(event.call);
+            yield { type: "tool_call", name: event.call.name, arguments: event.call.arguments };
+          } else if (event.type === "error") {
+            providerFailed = true;
+            yield { type: "error", code: event.code, message: event.message };
+          } else if (event.type === "done") {
+            finishReason = event.finish_reason;
+          }
+        }
+
+        if (providerFailed) {
+          await this.appendAssistant(conversation.conversation_id, assistantText, []);
+          return;
+        }
+
+        await this.appendAssistant(conversation.conversation_id, assistantText, toolCalls);
+        if (assistantText !== "" || toolCalls.length > 0) {
+          messages.push({
+            role: "assistant",
+            content: assistantText,
+            ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+          });
+        }
+
+        if (toolCalls.length === 0) {
+          void finishReason;
+          break;
+        }
+
+        for (const call of toolCalls) {
+          throwIfAborted(input.signal);
+          const outcome = await executeTool(
+            this.tools,
+            call.name,
+            call.arguments,
+            this.deps.services,
+          );
+          const content = outcome.ok
+            ? JSON.stringify(outcome.result)
+            : `Error: ${JSON.stringify(outcome.error.toJSON())}`;
+          yield {
+            type: "tool_result",
+            name: call.name,
+            ok: outcome.ok,
+            result: outcome.ok ? outcome.result : outcome.error.toJSON(),
+          };
+          const toolMessage: ConversationMessage = {
+            role: "tool",
+            content,
+            created_at: new Date().toISOString(),
+            tool_call_id: call.id,
+            name: call.name,
+          };
+          await this.deps.conversations.appendMessage(conversation.conversation_id, toolMessage);
+          messages.push(toLlmMessage(toolMessage));
+        }
+      }
+
+      yield { type: "done", conversation_id: conversation.conversation_id, title: conversation.title };
+    } finally {
+      this.activeConversations.delete(id);
+    }
   }
 
   private async appendAssistant(

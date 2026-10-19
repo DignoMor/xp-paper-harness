@@ -315,7 +315,6 @@ export async function executeTool(
         ok: false,
         error: new AppError("INVALID_INPUT", `Tool "${name}" received invalid JSON arguments.`, {
           tool: name,
-          detail: error instanceof Error ? error.message : String(error),
         }),
       };
     }
@@ -328,7 +327,6 @@ export async function executeTool(
       ok: false,
       error: new AppError("INTERNAL", `Tool "${name}" failed unexpectedly.`, {
         tool: name,
-        detail: error instanceof Error ? error.message : String(error),
       }),
     };
   }

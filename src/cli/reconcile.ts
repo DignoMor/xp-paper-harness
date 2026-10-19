@@ -98,7 +98,7 @@ if (isEntrypoint) {
   runReconcileCli(process.argv.slice(2))
     .then((code) => process.exit(code))
     .catch((error) => {
-      process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
+      process.stderr.write("Reconciliation could not run; check configuration and data access.\n");
       process.exit(1);
     });
 }

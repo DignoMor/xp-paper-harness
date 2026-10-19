@@ -560,7 +560,7 @@ export class LibraryService {
         embedded_title: null,
         truncated: { bytes: false, pages: false, chars: false },
         continuation: null,
-        error: error instanceof Error ? error.message : String(error),
+        error: "PDF extraction could not be completed.",
       };
     }
   }

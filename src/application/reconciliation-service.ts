@@ -161,7 +161,7 @@ export class ReconciliationService {
           paper_id: paperId,
           attachment_id: attachment.attachment_id,
           repairable: false,
-          detail: error instanceof Error ? error.message : String(error),
+          detail: "Attachment bytes could not be read.",
         });
       }
     }

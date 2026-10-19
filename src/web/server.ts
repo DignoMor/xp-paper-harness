@@ -39,9 +39,7 @@ export function createWebServer(deps: WebServerDeps): WebServer {
       }
       const appError = isAppError(error)
         ? error
-        : new AppError("INTERNAL", "An unexpected error occurred.", {
-            detail: error instanceof Error ? error.message : String(error),
-          });
+        : new AppError("INTERNAL", "An unexpected error occurred.");
       sendJson(res, appError.httpStatus, appError.toJSON());
     });
   });
@@ -269,9 +267,7 @@ async function streamAgent(
   } catch (error) {
     const appError = isAppError(error)
       ? error
-      : new AppError("INTERNAL", "The agent stream failed.", {
-          detail: error instanceof Error ? error.message : String(error),
-        });
+      : new AppError("INTERNAL", "The agent stream failed.");
     writeSse(res, { type: "error", code: appError.code, message: appError.message });
   } finally {
     res.off("close", onClose);

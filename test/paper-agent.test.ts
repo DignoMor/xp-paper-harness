@@ -324,3 +324,18 @@ it('does not execute a tool yielded after HTTP cancellation, even if the provide
     expect(await harness.uploads.get(upload as never)).not.toBeNull();
   } finally { await harness.cleanup(); }
 });
+it('rejects overlapping runs for one Conversation and releases it after cancellation', async () => {
+  const harness = await createTestHarness();
+  try {
+    const { meta } = await harness.conversations.create();
+    const active = harness.agent.run({ prompt: 'first', conversation_id: meta.conversation_id })[Symbol.asyncIterator]();
+    expect((await active.next()).value).toMatchObject({ type: 'conversation' });
+    try {
+      const overlapping = await collect(harness.agent.run({ prompt: 'second', conversation_id: meta.conversation_id }));
+      expect(overlapping).toEqual([{ type: 'error', code: 'CONFLICT', message: 'This Conversation already has an active response.' }]);
+      expect(await harness.conversations.history(meta.conversation_id)).toEqual([]);
+    } finally { await active.return?.(); }
+    const retried = await collect(harness.agent.run({ prompt: 'retry', conversation_id: meta.conversation_id }));
+    expect(retried[0]).toMatchObject({ type: 'conversation' });
+  } finally { await harness.cleanup(); }
+});

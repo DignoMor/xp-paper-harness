@@ -116,13 +116,17 @@ function validateAttachment(value: unknown, label: string): AttachmentRecord {
       value: media_type,
     });
   }
+  const sha256 = requireString(obj.sha256, `${label}.sha256`, { max: 64 });
+  if (!/^[0-9a-f]{64}$/.test(sha256)) {
+    throw new AppError("CORRUPT_CATALOG", `${label}.sha256 must be a lowercase SHA-256 digest.`);
+  }
   return {
     attachment_id,
     title: requireString(obj.title, `${label}.title`, { max: 2000 }),
     description: requireString(obj.description, `${label}.description`, { max: 10000 }),
     original_filename: requireString(obj.original_filename, `${label}.original_filename`, { max: 1000 }),
     media_type,
-    sha256: requireString(obj.sha256, `${label}.sha256`, { max: 64 }),
+    sha256,
     byte_size: requireInteger(obj.byte_size, `${label}.byte_size`),
     imported_at: requireString(obj.imported_at, `${label}.imported_at`, { max: 100 }),
     page_count,

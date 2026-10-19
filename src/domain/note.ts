@@ -45,7 +45,6 @@ export function parseNote(raw: string): ParsedNote {
   } catch (error) {
     throw new AppError("CORRUPT_CATALOG", "Paper Note frontmatter is not valid YAML.", {
       reason: "invalid_yaml",
-      detail: error instanceof Error ? error.message : String(error),
     });
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
